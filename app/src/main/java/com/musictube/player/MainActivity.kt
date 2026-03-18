@@ -1,6 +1,7 @@
 package com.musictube.player
 
 import android.Manifest
+import android.content.Intent
 import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
@@ -8,6 +9,9 @@ import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.navigation.compose.NavHost
@@ -31,15 +35,29 @@ class MainActivity : ComponentActivity() {
     
     @Inject
     lateinit var playerManager: MusicPlayerManager
+
+    // Drives navigation requests from notification intents into the Compose NavHost.
+    private var pendingDestination by mutableStateOf<String?>(null)
     
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        pendingDestination = intent?.getStringExtra("navigate_to")
         
         setContent {
             MusicTubeTheme {
-                MusicTubeApp()
+                MusicTubeApp(
+                    pendingDestination = pendingDestination,
+                    onPendingConsumed = { pendingDestination = null }
+                )
             }
         }
+    }
+
+    /** Called when the Activity already exists and a new intent is delivered (e.g. notification tap). */
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        pendingDestination = intent.getStringExtra("navigate_to")
     }
     
     override fun onResume() {
@@ -50,11 +68,8 @@ class MainActivity : ComponentActivity() {
     
     override fun onPause() {
         super.onPause()
-        // Park WebView to keep it active when app goes to background
+        // Park WebView in decor view so audio keeps playing in background
         playerManager.parkWebView(this)
-        
-        // Additional measure: try to prevent YouTube from detecting the pause
-        playerManager.resumeWebView()
     }
     
     override fun onStop() {
@@ -66,9 +81,21 @@ class MainActivity : ComponentActivity() {
 
 @OptIn(ExperimentalPermissionsApi::class)
 @Composable
-fun MusicTubeApp() {
+fun MusicTubeApp(
+    pendingDestination: String? = null,
+    onPendingConsumed: () -> Unit = {}
+) {
     val navController = rememberNavController()
     val mainViewModel: MainViewModel = hiltViewModel()
+
+    // Navigate to a screen requested by an incoming intent (e.g. notification tap).
+    LaunchedEffect(pendingDestination) {
+        val dest = pendingDestination
+        if (dest != null) {
+            navController.navigate(dest) { launchSingleTop = true }
+            onPendingConsumed()
+        }
+    }
     
     // Request storage permissions
     val storagePermission = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {

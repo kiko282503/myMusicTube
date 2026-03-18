@@ -36,17 +36,25 @@ fun PlayerScreen(
     viewModel: PlayerViewModel = hiltViewModel()
 ) {
     val currentSong by viewModel.currentSong.collectAsState()
+    val currentVideoId by viewModel.currentVideoId.collectAsState()
     val isPlaying by viewModel.isPlaying.collectAsState()
     val currentPosition by viewModel.currentPosition.collectAsState()
     val duration by viewModel.duration.collectAsState()
     val context = LocalContext.current
+
+    // Ensure the WebView is created (and permanently attached to the Activity content view)
+    // whenever a YouTube song is active. No need to host it in Compose — GONE visibility
+    // keeps it alive with audio/JS running without any view hierarchy juggling.
+    if (currentVideoId != null) viewModel.getOrCreateWebView(context)
 
     Scaffold(
         topBar = {
             TopAppBar(
                 title = { Text("Now Playing") },
                 navigationIcon = {
-                    IconButton(onClick = onNavigateBack) {
+                    IconButton(onClick = {
+                        onNavigateBack()
+                    }) {
                         Icon(Icons.Default.ArrowBack, contentDescription = "Back")
                     }
                 },
@@ -205,9 +213,9 @@ fun PlayerScreen(
                     Spacer(modifier = Modifier.size(56.dp))
                 }
                 
+                // Artwork / WebView area
                 Spacer(modifier = Modifier.height(16.dp))
 
-                // ExoPlayer UI card - single card only
                 Card(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -219,26 +227,51 @@ fun PlayerScreen(
                         modifier = Modifier.fillMaxSize(),
                         contentAlignment = Alignment.Center
                     ) {
-                        Column(
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                            verticalArrangement = Arrangement.Center
-                        ) {
-                            Text(
-                                text = "🎵",
-                                style = MaterialTheme.typography.displayLarge
-                            )
-                            Spacer(modifier = Modifier.height(16.dp))
-                            Text(
-                                text = "ExoPlayer Audio",
-                                style = MaterialTheme.typography.bodyLarge,
-                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
-                            )
-                            Spacer(modifier = Modifier.height(8.dp))
-                            Text(
-                                text = "Background playback supported",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.primary
-                            )
+                        if (currentVideoId != null) {
+                            // WebView lives in android.R.id.content (GONE) — no Compose hosting needed.
+                            Column(
+                                modifier = Modifier.fillMaxSize(),
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                verticalArrangement = Arrangement.Center
+                            ) {
+                                Text(text = "🎵", style = MaterialTheme.typography.displayLarge)
+                                Spacer(modifier = Modifier.height(16.dp))
+                                Text(
+                                    text = "YouTube Music",
+                                    style = MaterialTheme.typography.bodyLarge,
+                                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
+                                )
+                                Spacer(modifier = Modifier.height(8.dp))
+                                Text(
+                                    text = when {
+                                        isPlaying -> "Streaming"
+                                        currentPosition > 0 -> "Paused"
+                                        duration > 0 -> "Ready"
+                                        else -> "Loading..."
+                                    },
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = if (isPlaying) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
+                                )
+                            }
+                        } else {
+                            Column(
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                verticalArrangement = Arrangement.Center
+                            ) {
+                                Text(text = "🎵", style = MaterialTheme.typography.displayLarge)
+                                Spacer(modifier = Modifier.height(16.dp))
+                                Text(
+                                    text = "ExoPlayer Audio",
+                                    style = MaterialTheme.typography.bodyLarge,
+                                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
+                                )
+                                Spacer(modifier = Modifier.height(8.dp))
+                                Text(
+                                    text = "Background playback supported",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.primary
+                                )
+                            }
                         }
                     }
                 }

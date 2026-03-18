@@ -98,9 +98,9 @@ class SearchService @Inject constructor() {
                     ?.getAsJsonObject("text")
                     ?.getAsJsonArray("runs")
                 val typeText = runs?.firstOrNull()?.asJsonObject?.get("text")?.asString?.lowercase() ?: ""
-                // Skip playlists, albums, and artist entries — keep songs and videos only
-                if (typeText == "playlist" || typeText == "album" || typeText == "ep" ||
-                    typeText == "single" || typeText == "artist") return null
+                // Only keep items explicitly labelled "song" (or no type label).
+                // This filters out Video, Episode, Playlist, Album, EP, Single, Artist, etc.
+                if (typeText.isNotEmpty() && typeText != "song") return null
             }
 
             // videoId from the overlay play button endpoint

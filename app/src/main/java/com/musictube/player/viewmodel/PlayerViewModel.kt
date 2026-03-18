@@ -32,11 +32,7 @@ class PlayerViewModel @Inject constructor(
     /** Park the WebView in the decor view so audio keeps playing when navigating back. */
     fun parkWebView(context: Context) = playerManager.parkWebView(context)
 
-    fun play() { 
-        currentSong.value?.let { song -> 
-            playerManager.playSong(song)
-        } 
-    }
+    fun play() { playerManager.replayCurrent() }
     fun pause() { playerManager.pause() }
     fun resume() { playerManager.resume() }
     fun stop() { playerManager.stop() }

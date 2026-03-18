@@ -52,6 +52,10 @@ class HomeViewModel @Inject constructor(
             initialValue = emptyList()
         )
 
+    // Expose current playback state so HomeScreen can show a Now Playing bar.
+    val currentSong = playerManager.currentSong
+    val isPlayingNow = playerManager.isPlaying
+
     init {
         loadTrendingSongs()
         loadQuickPicks()

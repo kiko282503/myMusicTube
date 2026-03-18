@@ -3,88 +3,100 @@
 import android.util.Log
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import org.schabi.newpipe.extractor.NewPipe
-import org.schabi.newpipe.extractor.ServiceList
-import org.schabi.newpipe.extractor.stream.AudioStream
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import org.json.JSONObject
+import java.util.concurrent.TimeUnit
 import javax.inject.Inject
 import javax.inject.Singleton
 
+/**
+ * Extracts YouTube audio stream URLs via the Piped API (open-source YouTube proxy).
+ * Piped does server-side extraction and returns usable audio stream URLs.
+ * Multiple instances are tried in order for reliability.
+ */
 @Singleton
 class YouTubeAudioExtractor @Inject constructor() {
 
     companion object {
         private const val TAG = "YouTubeAudioExtractor"
+
+        // Public Piped API instances - tried in order until one works
+        private val PIPED_INSTANCES = listOf(
+            "https://pipedapi.kavin.rocks",
+            "https://piped-api.garudalinux.org",
+            "https://api.piped.projectsegfau.lt",
+            "https://pipedapi.bockhacker.me",
+            "https://piped-api.codeberg.page"
+        )
     }
 
+    private val client = OkHttpClient.Builder()
+        .connectTimeout(15, TimeUnit.SECONDS)
+        .readTimeout(20, TimeUnit.SECONDS)
+        .build()
+
     /**
-     * Extract direct audio stream URL from a YouTube video using NewPipe Extractor.
-     * Returns the best-quality audio stream URL, or null if extraction fails.
+     * Extract best audio stream URL for a YouTube video ID.
+     * Tries multiple Piped API instances until one succeeds.
      */
     suspend fun extractAudioUrl(videoId: String): String? {
         return withContext(Dispatchers.IO) {
-            try {
-                Log.d(TAG, "Extracting audio via NewPipe for: ")
-
-                val url = "https://www.youtube.com/watch?v=$videoId"
-                val extractor = ServiceList.YouTube.getStreamExtractor(url)
-                extractor.fetchPage()
-
-                val audioStreams: List<AudioStream> = extractor.audioStreams
-                if (audioStreams.isEmpty()) {
-                    Log.w(TAG, "No audio streams found for: $videoId")
-                    return@withContext null
+            for (instance in PIPED_INSTANCES) {
+                try {
+                    val url = fetchFromPiped(instance, videoId)
+                    if (url != null) {
+                        Log.i(TAG, "Piped extraction SUCCESS from $instance for: $videoId")
+                        return@withContext url
+                    }
+                } catch (e: Exception) {
+                    Log.w(TAG, "Piped instance $instance failed for $videoId: ${e.message}")
                 }
-
-                // Pick highest bitrate audio stream
-                val best = audioStreams.maxByOrNull { it.averageBitrate }
-                val streamUrl = best?.content
-
-                if (streamUrl != null) {
-                    Log.i(TAG, "NewPipe extraction SUCCESS for: $videoId (bitrate: ${best.averageBitrate})")
-                } else {
-                    Log.w(TAG, "NewPipe returned null stream URL for: $videoId")
-                }
-
-                streamUrl
-            } catch (e: Exception) {
-                Log.e(TAG, "NewPipe extraction FAILED for: $videoId", e)
-                null
             }
+            Log.e(TAG, "All Piped instances failed for: $videoId")
+            null
         }
     }
 
-    /**
-     * Extract audio URL using YouTube Music API specifically.
-     * YouTube Music uses the same video IDs, so we just use the standard extractor.
-     */
-    suspend fun extractFromYouTubeMusic(videoId: String): String? {
-        return withContext(Dispatchers.IO) {
-            try {
-                Log.d(TAG, "Extracting YouTube Music audio via NewPipe for: $videoId")
+    /** Same as extractAudioUrl - Piped handles YouTube Music video IDs too */
+    suspend fun extractFromYouTubeMusic(videoId: String): String? = extractAudioUrl(videoId)
 
-                val url = "https://music.youtube.com/watch?v=$videoId"
-                // NewPipe recognises music.youtube.com URLs as YouTube service
-                val extractor = ServiceList.YouTube.getStreamExtractor(url)
-                extractor.fetchPage()
+    private fun fetchFromPiped(instance: String, videoId: String): String? {
+        val request = Request.Builder()
+            .url("$instance/streams/$videoId")
+            .addHeader("User-Agent", "MusicTube/1.0 (Android)")
+            .build()
 
-                val audioStreams: List<AudioStream> = extractor.audioStreams
-                if (audioStreams.isEmpty()) {
-                    Log.w(TAG, "No audio streams from YouTube Music for: $videoId")
-                    return@withContext null
-                }
+        val response = client.newCall(request).execute()
+        if (!response.isSuccessful) {
+            Log.w(TAG, "Piped $instance returned ${response.code} for $videoId")
+            return null
+        }
 
-                val best = audioStreams.maxByOrNull { it.averageBitrate }
-                val streamUrl = best?.content
+        val body = response.body?.string() ?: return null
+        val json = JSONObject(body)
 
-                if (streamUrl != null) {
-                    Log.i(TAG, "YouTube Music NewPipe extraction SUCCESS for: $videoId")
-                }
+        val audioStreams = json.optJSONArray("audioStreams") ?: return null
+        if (audioStreams.length() == 0) return null
 
-                streamUrl
-            } catch (e: Exception) {
-                Log.e(TAG, "YouTube Music NewPipe extraction FAILED for: $videoId", e)
-                null
+        // Pick the highest bitrate audio-only stream
+        var bestUrl: String? = null
+        var bestBitrate = -1
+
+        for (i in 0 until audioStreams.length()) {
+            val stream = audioStreams.getJSONObject(i)
+            val bitrate = stream.optInt("bitrate", 0)
+            val streamUrl = stream.optString("url", "")
+            val mimeType = stream.optString("mimeType", "")
+
+            // Prefer audio-only streams (not video)
+            if (streamUrl.isNotEmpty() && bitrate > bestBitrate && !mimeType.startsWith("video")) {
+                bestBitrate = bitrate
+                bestUrl = streamUrl
             }
         }
+
+        Log.d(TAG, "Best audio stream bitrate: ${bestBitrate}bps for $videoId")
+        return bestUrl
     }
 }

@@ -43,6 +43,7 @@ class MusicPlayerService : Service() {
     private var audioFocusRequest: AudioFocusRequest? = null
     private val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
     private var thumbnailJob: Job? = null
+    private var monitorJob: Job? = null
     private var cachedArt: Bitmap? = null
     private var cachedArtUrl: String? = null
 
@@ -52,6 +53,8 @@ class MusicPlayerService : Service() {
         const val ACTION_PLAY = "com.musictube.ACTION_PLAY"
         const val ACTION_PAUSE = "com.musictube.ACTION_PAUSE"
         const val ACTION_STOP = "com.musictube.ACTION_STOP"
+        /** Fired when the user swipes the notification away — pauses audio and stops service. */
+        const val ACTION_DISMISS = "com.musictube.ACTION_DISMISS"
     }
 
     override fun onCreate() {
@@ -133,38 +136,10 @@ class MusicPlayerService : Service() {
                 MediaSessionCompat.FLAG_HANDLES_TRANSPORT_CONTROLS
             )
             setCallback(object : MediaSessionCompat.Callback() {
-                override fun onPlay()  { 
-                    // Use ExoPlayer controls for sample audio, WebView controls for YouTube
-                    val currentSong = playerManager.currentSong.value
-                    if (currentSong != null) {
-                        if (playerManager.currentVideoId.value != null) {
-                            playerManager.resumeWebViewPlayback()
-                        } else {
-                            playerManager.resume()
-                        }
-                    }
-                }
-                override fun onPause() { 
-                    // Use ExoPlayer controls for sample audio, WebView controls for YouTube
-                    val currentSong = playerManager.currentSong.value
-                    if (currentSong != null) {
-                        if (playerManager.currentVideoId.value != null) {
-                            playerManager.pauseWebViewPlayback()
-                        } else {
-                            playerManager.pause()
-                        }
-                    }
-                }
-                override fun onStop()  { 
-                    playerManager.stop()
-                    stopSelf() 
-                }
-                override fun onSeekTo(pos: Long) {
-                    // Only seek for ExoPlayer (sample audio), not WebView (YouTube)
-                    if (playerManager.currentVideoId.value == null) {
-                        playerManager.seekTo(pos)
-                    }
-                }
+                override fun onPlay()  { playerManager.resume() }
+                override fun onPause() { playerManager.pause() }
+                override fun onStop()  { playerManager.stop(); stopSelf() }
+                override fun onSeekTo(pos: Long) { playerManager.seekTo(pos) }
             })
             isActive = true
         }
@@ -193,13 +168,17 @@ class MusicPlayerService : Service() {
                 }
             }
             ACTION_STOP -> {
-                try {
-                    playerManager.stop()
-                    stopForeground(STOP_FOREGROUND_REMOVE)
-                    stopSelf()
-                } catch (e: Exception) {
-                    android.util.Log.e("MusicPlayerService", "Error stopping service", e)
-                }
+                // Note: do NOT call playerManager.stop() here — stop() already sent this intent.
+                // Calling it again would create a send loop.
+                stopForeground(STOP_FOREGROUND_REMOVE)
+                stopSelf()
+                return START_NOT_STICKY
+            }
+            ACTION_DISMISS -> {
+                // User swiped the notification away — pause audio and stop service.
+                playerManager.pause()
+                stopForeground(STOP_FOREGROUND_REMOVE)
+                stopSelf()
                 return START_NOT_STICKY
             }
             else -> {
@@ -232,8 +211,10 @@ class MusicPlayerService : Service() {
         updateMediaSession(title, artist, isPlaying, art = null)
         startForeground(NOTIFICATION_ID, buildNotification(title, artist, isPlaying, null))
 
-        // Start monitoring for playback state and position updates
-        scope.launch {
+        // Cancel any previous monitor loop before starting a fresh one — prevents duplicate
+        // loops from accumulating each time a new song starts.
+        monitorJob?.cancel()
+        monitorJob = scope.launch {
             while (true) {
                 kotlinx.coroutines.delay(1000) // Update every second for position
                 
@@ -253,9 +234,9 @@ class MusicPlayerService : Service() {
                         cachedArt
                     )
                     
-                    // Aggressively try to resume WebView playback if paused (for YouTube tracks)
+                    // For YouTube IFrame tracks, ensure WebView timers are running
                     if (currentPlayState && playerManager.currentVideoId.value != null) {
-                        playerManager.resumeWebViewPlayback()
+                        playerManager.resumeWebView()
                     }
                 }
             }
@@ -379,6 +360,7 @@ class MusicPlayerService : Service() {
             .setContentText(artist)
             .setLargeIcon(art)
             .setContentIntent(openApp)
+            .setDeleteIntent(pendingServiceIntent(ACTION_DISMISS, 3))
             .setOngoing(true)  // Always keep notification visible to prevent playback stopping
             .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
             .addAction(toggleAction)
