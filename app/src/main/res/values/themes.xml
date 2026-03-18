@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.MusicTube" parent="android:Theme.Material.NoActionBar">
+        <!-- Primary brand color -->
+        <item name="android:colorPrimary">@color/music_primary</item>
+        <item name="android:colorAccent">@color/music_primary_variant</item>
+        
+        <!-- Background colors -->
+        <item name="android:colorBackground">@color/music_background</item>
+        
+        <!-- Status bar -->
+        <item name="android:statusBarColor">@color/music_background</item>
+        <item name="android:navigationBarColor">@color/music_background</item>
+        <item name="android:windowLightStatusBar">false</item>
+    </style>
+</resources>

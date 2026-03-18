@@ -1,0 +1,15 @@
+{
+    "java.jdt.ls.java.home": "C:\\Program Files\\Microsoft\\jdk-17.0.18.8-hotspot",
+    "java.configuration.updateBuildConfiguration": "automatic",
+    "java.compile.nullAnalysis.mode": "automatic",
+    "files.exclude": {
+        "**/build": true,
+        "**/.gradle": true,
+        "**/.*": false
+    },
+    "java.format.settings.url": "https://raw.githubusercontent.com/google/styleguide/gh-pages/eclipse-java-google-style.xml",
+    "editor.formatOnSave": true,
+    "editor.codeActionsOnSave": {
+        "source.organizeImports": "explicit"
+    }
+}
