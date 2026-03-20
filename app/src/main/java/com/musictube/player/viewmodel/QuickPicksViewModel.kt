@@ -63,6 +63,8 @@ class QuickPicksViewModel @Inject constructor(
     }
 
     fun playSearchResult(searchResult: SearchResult) {
+        if (!searchResult.isPlayable) return
+
         playerManager.playYouTubeAudioStream(
             videoId = searchResult.id,
             title = searchResult.title,

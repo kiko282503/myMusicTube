@@ -8,22 +8,149 @@ import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
+import java.net.URLDecoder
 import java.util.concurrent.TimeUnit
 import javax.inject.Inject
 import javax.inject.Singleton
+import org.schabi.newpipe.extractor.NewPipe
+import org.schabi.newpipe.extractor.ServiceList
+import org.schabi.newpipe.extractor.stream.StreamInfo
 
 @Singleton
 class YouTubeStreamService @Inject constructor() {
 
     private val httpClient = OkHttpClient.Builder()
-        .connectTimeout(20, TimeUnit.SECONDS)
-        .readTimeout(20, TimeUnit.SECONDS)
+        .connectTimeout(10, TimeUnit.SECONDS)
+        .readTimeout(10, TimeUnit.SECONDS)
         .followRedirects(true)
         .build()
 
     suspend fun extractAudioUrl(videoId: String): String? = withContext(Dispatchers.IO) {
         Log.d("YT", "Extracting audio for: $videoId")
-        fetchWithCobalt(videoId) ?: fetchWithPiped(videoId) ?: fetchWithInvidious(videoId)
+        fetchWithYouTubeiAndroid(videoId)
+            ?: fetchWithNewPipe(videoId)
+            ?: fetchWithPiped(videoId)
+            ?: fetchWithInvidious(videoId)
+            ?: fetchWithCobalt(videoId)
+    }
+
+    private fun fetchWithYouTubeiAndroid(videoId: String): String? {
+        return try {
+            Log.d("YT", "YouTubei Android: trying $videoId")
+            val body = """{
+                "context": {
+                    "client": {
+                        "clientName": "ANDROID",
+                        "clientVersion": "19.17.34",
+                        "androidSdkVersion": 34,
+                        "hl": "en",
+                        "gl": "US"
+                    }
+                },
+                "videoId": "$videoId",
+                "contentCheckOk": true,
+                "racyCheckOk": true
+            }""".trimIndent()
+
+            val request = Request.Builder()
+                .url("https://www.youtube.com/youtubei/v1/player?prettyPrint=false")
+                .post(body.toRequestBody("application/json".toMediaType()))
+                .addHeader("User-Agent", "com.google.android.youtube/19.17.34 (Linux; U; Android 14)")
+                .addHeader("X-YouTube-Client-Name", "3")
+                .addHeader("X-YouTube-Client-Version", "19.17.34")
+                .addHeader("Content-Type", "application/json")
+                .build()
+
+            val response = httpClient.newCall(request).execute()
+            val raw = response.body?.string()
+            if (!response.isSuccessful || raw == null) {
+                Log.w("YT", "YouTubei Android HTTP ${response.code}")
+                return null
+            }
+
+            val root = JsonParser.parseString(raw).asJsonObject
+            val directUrl = extractAudioUrlFromPlayerJson(root)
+            if (directUrl != null) {
+                Log.d("YT", "YouTubei Android: success")
+                return directUrl
+            }
+
+            Log.w("YT", "YouTubei Android: no direct audio URL")
+            null
+        } catch (e: Exception) {
+            Log.w("YT", "YouTubei Android failed: ${e.message}")
+            null
+        }
+    }
+
+    private fun extractAudioUrlFromPlayerJson(root: com.google.gson.JsonObject): String? {
+        val streamingData = root.getAsJsonObject("streamingData") ?: return null
+
+        val candidates = mutableListOf<com.google.gson.JsonObject>()
+        streamingData.getAsJsonArray("adaptiveFormats")?.forEach { candidates.add(it.asJsonObject) }
+        streamingData.getAsJsonArray("formats")?.forEach { candidates.add(it.asJsonObject) }
+
+        var bestUrl: String? = null
+        var bestBitrate = -1
+
+        for (fmt in candidates) {
+            val mimeType = fmt.get("mimeType")?.asString ?: ""
+            if (!mimeType.startsWith("audio/")) continue
+
+            val bitrate = try { fmt.get("bitrate")?.asInt ?: 0 } catch (_: Exception) { 0 }
+            val direct = fmt.get("url")?.asString
+            val fromCipher = fmt.get("signatureCipher")?.asString
+                ?.let { parseUrlFromSignatureCipher(it) }
+
+            val url = direct ?: fromCipher ?: continue
+            if (bitrate > bestBitrate) {
+                bestBitrate = bitrate
+                bestUrl = url
+            }
+        }
+
+        return bestUrl
+    }
+
+    private fun parseUrlFromSignatureCipher(cipher: String): String? {
+        return try {
+            cipher.split("&")
+                .mapNotNull { part ->
+                    val idx = part.indexOf('=')
+                    if (idx <= 0) return@mapNotNull null
+                    val key = part.substring(0, idx)
+                    val value = part.substring(idx + 1)
+                    key to value
+                }
+                .toMap()["url"]
+                ?.let { URLDecoder.decode(it, "UTF-8") }
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    private fun fetchWithNewPipe(videoId: String): String? {
+        return try {
+            Log.d("YT", "NewPipe: trying $videoId")
+            val url = "https://www.youtube.com/watch?v=$videoId"
+            val info = StreamInfo.getInfo(ServiceList.YouTube, url)
+            val audioStreams = info.audioStreams
+            if (audioStreams.isEmpty()) {
+                Log.w("YT", "NewPipe: no audio streams for $videoId")
+                return null
+            }
+            val best = audioStreams.maxByOrNull { it.averageBitrate }
+            val audioUrl = best?.content
+            if (audioUrl != null) {
+                Log.d("YT", "NewPipe: success, host=${audioUrl.substringBefore('/').takeLast(40)}, bitrate=${best?.averageBitrate}")
+            } else {
+                Log.w("YT", "NewPipe: no URL in best stream")
+            }
+            audioUrl
+        } catch (e: Exception) {
+            Log.w("YT", "NewPipe failed for $videoId: ${e.message}")
+            null
+        }
     }
 
     private fun fetchWithCobalt(videoId: String): String? {

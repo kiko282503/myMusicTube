@@ -1,11 +1,11 @@
 package com.musictube.player.ui.component
 
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ArrowDropDown
+import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.ErrorOutline
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material3.*
@@ -18,12 +18,13 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
 import com.musictube.player.data.model.SearchResult
-import com.musictube.player.viewmodel.DownloadStatus
+import com.musictube.player.service.DownloadStatus
 
 @Composable
 fun SearchResultItem(
     searchResult: SearchResult,
     downloadStatus: DownloadStatus,
+    downloadProgress: Int = 0,
     onDownload: () -> Unit,
     onPlay: () -> Unit,
     modifier: Modifier = Modifier
@@ -75,9 +76,7 @@ fun SearchResultItem(
             Spacer(modifier = Modifier.width(16.dp))
             
             // Song details
-            Column(
-                modifier = Modifier.weight(1f)
-            ) {
+            Column(modifier = Modifier.weight(1f)) {
                 Text(
                     text = searchResult.title,
                     style = MaterialTheme.typography.bodyLarge,
@@ -109,58 +108,68 @@ fun SearchResultItem(
                         )
                     }
                 }
+
+                if (searchResult.isPlayable && downloadStatus == DownloadStatus.DOWNLOADING) {
+                    Spacer(modifier = Modifier.height(6.dp))
+                    LinearProgressIndicator(
+                        progress = { (downloadProgress.coerceIn(0, 100)) / 100f },
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    Text(
+                        text = "${downloadProgress.coerceIn(0, 100)}%",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
+                    )
+                }
             }
             
             Spacer(modifier = Modifier.width(8.dp))
             
-            // Download button with status
-            when (downloadStatus) {
-                DownloadStatus.IDLE -> {
-                    IconButton(
-                        onClick = onDownload,
-                        modifier = Modifier.size(40.dp)
-                    ) {
-                        Icon(
-                            Icons.Default.ArrowDropDown,
-                            contentDescription = "Download",
-                            tint = MaterialTheme.colorScheme.primary
-                        )
+            // Download action
+            if (searchResult.isPlayable) {
+                when (downloadStatus) {
+                    DownloadStatus.IDLE -> {
+                        IconButton(
+                            onClick = onDownload,
+                            modifier = Modifier.size(36.dp)
+                        ) {
+                            Icon(
+                                Icons.Default.Download,
+                                contentDescription = "Download for offline",
+                                tint = MaterialTheme.colorScheme.primary
+                            )
+                        }
                     }
-                }
-                DownloadStatus.DOWNLOADING -> {
-                    Box(
-                        modifier = Modifier.size(40.dp),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        CircularProgressIndicator(
-                            modifier = Modifier.size(24.dp),
-                            strokeWidth = 2.dp
-                        )
+                    DownloadStatus.DOWNLOADING -> {
+                        Box(
+                            modifier = Modifier.size(40.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(24.dp),
+                                strokeWidth = 2.dp
+                            )
+                        }
                     }
-                }
-                DownloadStatus.COMPLETED -> {
-                    IconButton(
-                        onClick = { },
-                        modifier = Modifier.size(40.dp),
-                        enabled = false
-                    ) {
+                    DownloadStatus.COMPLETED -> {
                         Icon(
                             Icons.Default.Check,
                             contentDescription = "Downloaded",
-                            tint = MaterialTheme.colorScheme.primary
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(24.dp)
                         )
                     }
-                }
-                DownloadStatus.FAILED -> {
-                    IconButton(
-                        onClick = onDownload,
-                        modifier = Modifier.size(40.dp)
-                    ) {
-                        Icon(
-                            Icons.Default.ArrowDropDown,
-                            contentDescription = "Retry Download",
-                            tint = MaterialTheme.colorScheme.error
-                        )
+                    DownloadStatus.FAILED -> {
+                        IconButton(
+                            onClick = onDownload,
+                            modifier = Modifier.size(36.dp)
+                        ) {
+                            Icon(
+                                Icons.Default.ErrorOutline,
+                                contentDescription = "Retry download",
+                                tint = MaterialTheme.colorScheme.error
+                            )
+                        }
                     }
                 }
             }

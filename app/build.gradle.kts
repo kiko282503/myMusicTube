@@ -116,7 +116,7 @@ dependencies {
     implementation("com.squareup.retrofit2:converter-gson:2.9.0")
     
     // NewPipe Extractor - for real YouTube audio stream extraction
-    implementation("com.github.TeamNewPipe:NewPipeExtractor:v0.24.2")
+    implementation("com.github.TeamNewPipe:NewPipeExtractor:v0.26.0")
     
     testImplementation("junit:junit:4.13.2")
     androidTestImplementation("androidx.test.ext:junit:1.1.5")
