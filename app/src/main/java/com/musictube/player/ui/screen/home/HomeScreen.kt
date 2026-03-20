@@ -15,6 +15,7 @@ import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -52,6 +53,9 @@ fun HomeScreen(
     val downloadedVideoIds by viewModel.downloadedVideoIds.collectAsState()
     val nowPlayingSong by viewModel.currentSong.collectAsState()
     val isPlayingNow by viewModel.isPlayingNow.collectAsState()
+    val miniPlayerPosition by viewModel.currentPosition.collectAsState()
+    val miniPlayerDuration by viewModel.duration.collectAsState()
+    val miniPlayerQueueSize by viewModel.playQueueSize.collectAsState()
 
     val homePlaylists by remember(playlists, offlinePlaylistId) {
         derivedStateOf {
@@ -116,39 +120,75 @@ fun HomeScreen(
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .clickable { onNavigateToPlayer() }
-                            .padding(horizontal = 16.dp, vertical = 10.dp),
+                            .padding(horizontal = 8.dp, vertical = 4.dp),
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        Icon(
-                            Icons.Default.MusicNote,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.size(28.dp)
-                        )
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = song.title,
-                                style = MaterialTheme.typography.bodyMedium,
-                                fontWeight = FontWeight.SemiBold,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
+                        // Tapping the song info area navigates to the full player
+                        Row(
+                            modifier = Modifier
+                                .weight(1f)
+                                .clickable { onNavigateToPlayer() }
+                                .padding(horizontal = 8.dp, vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            Icon(
+                                Icons.Default.MusicNote,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(28.dp)
                             )
-                            Text(
-                                text = song.artist,
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
+                            Column {
+                                Text(
+                                    text = song.title,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    fontWeight = FontWeight.SemiBold,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                                Text(
+                                    text = song.artist,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
                         }
-                        Icon(
-                            if (isPlayingNow) Icons.Default.Pause
-                                else Icons.Default.PlayArrow,
-                            contentDescription = if (isPlayingNow) "Playing" else "Paused",
-                            tint = MaterialTheme.colorScheme.primary
-                        )
+                        // Play/pause button with circular progress ring
+                        Box(contentAlignment = Alignment.Center) {
+                            if (miniPlayerDuration > 0) {
+                                CircularProgressIndicator(
+                                    progress = {
+                                        (miniPlayerPosition.toFloat() / miniPlayerDuration.toFloat()).coerceIn(0f, 1f)
+                                    },
+                                    modifier = Modifier.size(44.dp),
+                                    strokeWidth = 2.5.dp,
+                                    trackColor = MaterialTheme.colorScheme.surfaceVariant
+                                )
+                            }
+                            IconButton(
+                                onClick = { if (isPlayingNow) viewModel.pause() else viewModel.resume() },
+                                modifier = Modifier.size(44.dp)
+                            ) {
+                                Icon(
+                                    if (isPlayingNow) Icons.Default.Pause else Icons.Default.PlayArrow,
+                                    contentDescription = if (isPlayingNow) "Pause" else "Play",
+                                    tint = MaterialTheme.colorScheme.primary
+                                )
+                            }
+                        }
+                        // Skip next — only when playing from a multi-song queue
+                        if (miniPlayerQueueSize > 1) {
+                            IconButton(onClick = { viewModel.playNext() }) {
+                                Icon(
+                                    Icons.Default.SkipNext,
+                                    contentDescription = "Next",
+                                    tint = MaterialTheme.colorScheme.onSurface
+                                )
+                            }
+                        }
                     }
                 }
             }

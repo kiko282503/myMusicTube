@@ -11,6 +11,10 @@ import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Repeat
+import androidx.compose.material.icons.filled.Shuffle
+import androidx.compose.material.icons.filled.SkipNext
+import androidx.compose.material.icons.filled.SkipPrevious
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.filled.VolumeDown
 import androidx.compose.material.icons.filled.VolumeUp
@@ -50,6 +54,11 @@ fun PlayerScreen(
     val downloadProgress by viewModel.currentDownloadProgress.collectAsState()
     val playlists by viewModel.getPlaylistList().collectAsState(initial = emptyList())
     val isInAnyPlaylist by viewModel.isCurrentSongInAnyPlaylist.collectAsState()
+    val hasPrevious by viewModel.hasPrevious.collectAsState()
+    val hasNext by viewModel.hasNext.collectAsState()
+    val isShuffleOn by viewModel.isShuffleOn.collectAsState()
+    val isRepeatOn by viewModel.isRepeatOn.collectAsState()
+    val playQueueSize by viewModel.playQueueSize.collectAsState()
     val context = LocalContext.current
     
     var showPlaylistDialog by remember { mutableStateOf(false) }
@@ -180,11 +189,61 @@ fun PlayerScreen(
                 
                 // Playback controls
                 Spacer(modifier = Modifier.height(16.dp))
+
+                // Shuffle & Repeat toggles — only shown when a queue is active
+                if (playQueueSize > 1) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        IconButton(onClick = { viewModel.toggleShuffle() }) {
+                            Icon(
+                                Icons.Default.Shuffle,
+                                contentDescription = "Shuffle",
+                                tint = if (isShuffleOn) MaterialTheme.colorScheme.primary
+                                       else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f),
+                                modifier = Modifier.size(24.dp)
+                            )
+                        }
+                        IconButton(onClick = { viewModel.toggleRepeat() }) {
+                            Icon(
+                                Icons.Default.Repeat,
+                                contentDescription = "Repeat",
+                                tint = if (isRepeatOn) MaterialTheme.colorScheme.primary
+                                       else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f),
+                                modifier = Modifier.size(24.dp)
+                            )
+                        }
+                    }
+                }
+
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceEvenly,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
+                    // Previous button — only shown for multi-song queues
+                    if (playQueueSize > 1) {
+                        IconButton(
+                            onClick = { viewModel.playPrevious() },
+                            modifier = Modifier.size(56.dp),
+                            enabled = hasPrevious
+                        ) {
+                            Icon(
+                                Icons.Default.SkipPrevious,
+                                contentDescription = "Previous",
+                                tint = if (hasPrevious) MaterialTheme.colorScheme.onSurface
+                                       else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.3f),
+                                modifier = Modifier.size(32.dp)
+                            )
+                        }
+                    } else {
+                        Spacer(modifier = Modifier.size(56.dp))
+                    }
+
                     // Stop button
                     IconButton(
                         onClick = { viewModel.stop() },
@@ -221,9 +280,25 @@ fun PlayerScreen(
                             modifier = Modifier.size(40.dp)
                         )
                     }
-                    
-                    // Spacer to balance the layout (no second control for now)
-                    Spacer(modifier = Modifier.size(56.dp))
+
+                    // Next button — only shown for multi-song queues
+                    if (playQueueSize > 1) {
+                        IconButton(
+                            onClick = { viewModel.playNext() },
+                            modifier = Modifier.size(56.dp),
+                            enabled = hasNext
+                        ) {
+                            Icon(
+                                Icons.Default.SkipNext,
+                                contentDescription = "Next",
+                                tint = if (hasNext) MaterialTheme.colorScheme.onSurface
+                                       else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.3f),
+                                modifier = Modifier.size(32.dp)
+                            )
+                        }
+                    } else {
+                        Spacer(modifier = Modifier.size(56.dp))
+                    }
                 }
                 
                 // Download and Add to Playlist buttons

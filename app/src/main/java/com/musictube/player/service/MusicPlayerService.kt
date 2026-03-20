@@ -53,6 +53,8 @@ class MusicPlayerService : Service() {
         const val ACTION_PLAY = "com.musictube.ACTION_PLAY"
         const val ACTION_PAUSE = "com.musictube.ACTION_PAUSE"
         const val ACTION_STOP = "com.musictube.ACTION_STOP"
+        const val ACTION_PREV = "com.musictube.ACTION_PREV"
+        const val ACTION_NEXT = "com.musictube.ACTION_NEXT"
         /** Fired when the user swipes the notification away — pauses audio and stops service. */
         const val ACTION_DISMISS = "com.musictube.ACTION_DISMISS"
     }
@@ -136,10 +138,12 @@ class MusicPlayerService : Service() {
                 MediaSessionCompat.FLAG_HANDLES_TRANSPORT_CONTROLS
             )
             setCallback(object : MediaSessionCompat.Callback() {
-                override fun onPlay()  { playerManager.resume() }
-                override fun onPause() { playerManager.pause() }
+                override fun onPlay()  { playerManager.resume(); updateNotificationPlayState(true) }
+                override fun onPause() { playerManager.pause(); updateNotificationPlayState(false) }
                 override fun onStop()  { playerManager.stop(); stopSelf() }
                 override fun onSeekTo(pos: Long) { playerManager.seekTo(pos) }
+                override fun onSkipToPrevious() { playerManager.playPrevious() }
+                override fun onSkipToNext()     { playerManager.playNext() }
             })
             isActive = true
         }
@@ -148,7 +152,6 @@ class MusicPlayerService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
             ACTION_PLAY -> {
-                // Use only ExoPlayer controls (no WebView)
                 val currentSong = playerManager.currentSong.value
                 if (currentSong != null) {
                     playerManager.resume()
@@ -158,7 +161,6 @@ class MusicPlayerService : Service() {
                 }
             }
             ACTION_PAUSE -> {
-                // Use only ExoPlayer controls (no WebView)
                 val currentSong = playerManager.currentSong.value
                 if (currentSong != null) {
                     playerManager.pause()
@@ -166,6 +168,12 @@ class MusicPlayerService : Service() {
                 } else {
                     android.util.Log.w("MusicPlayerService", "Cannot pause - no current song")
                 }
+            }
+            ACTION_PREV -> {
+                playerManager.playPrevious()
+            }
+            ACTION_NEXT -> {
+                playerManager.playNext()
             }
             ACTION_STOP -> {
                 // Note: do NOT call playerManager.stop() here — stop() already sent this intent.
@@ -282,7 +290,9 @@ class MusicPlayerService : Service() {
                     PlaybackStateCompat.ACTION_PLAY_PAUSE or
                     PlaybackStateCompat.ACTION_PLAY or
                     PlaybackStateCompat.ACTION_PAUSE or
-                    PlaybackStateCompat.ACTION_STOP
+                    PlaybackStateCompat.ACTION_STOP or
+                    PlaybackStateCompat.ACTION_SKIP_TO_PREVIOUS or
+                    PlaybackStateCompat.ACTION_SKIP_TO_NEXT
                 )
                 .build()
         )
@@ -312,7 +322,9 @@ class MusicPlayerService : Service() {
                     PlaybackStateCompat.ACTION_PLAY or
                     PlaybackStateCompat.ACTION_PAUSE or
                     PlaybackStateCompat.ACTION_STOP or
-                    PlaybackStateCompat.ACTION_SEEK_TO
+                    PlaybackStateCompat.ACTION_SEEK_TO or
+                    PlaybackStateCompat.ACTION_SKIP_TO_PREVIOUS or
+                    PlaybackStateCompat.ACTION_SKIP_TO_NEXT
                 )
                 .build()
         )
@@ -337,6 +349,10 @@ class MusicPlayerService : Service() {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
+        val prevAction = NotificationCompat.Action(
+            R.drawable.ic_skip_previous, "Previous",
+            pendingServiceIntent(ACTION_PREV, 0)
+        )
         val toggleAction = if (isPlaying) {
             NotificationCompat.Action(
                 R.drawable.ic_pause, "Pause",
@@ -348,10 +364,9 @@ class MusicPlayerService : Service() {
                 pendingServiceIntent(ACTION_PLAY, 1)
             )
         }
-
-        val stopAction = NotificationCompat.Action(
-            R.drawable.ic_stop, "Stop",
-            pendingServiceIntent(ACTION_STOP, 2)
+        val nextAction = NotificationCompat.Action(
+            R.drawable.ic_skip_next, "Next",
+            pendingServiceIntent(ACTION_NEXT, 2)
         )
 
         return NotificationCompat.Builder(this, CHANNEL_ID)
@@ -361,14 +376,15 @@ class MusicPlayerService : Service() {
             .setLargeIcon(art)
             .setContentIntent(openApp)
             .setDeleteIntent(pendingServiceIntent(ACTION_DISMISS, 3))
-            .setOngoing(true)  // Always keep notification visible to prevent playback stopping
+            .setOngoing(true)
             .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
-            .addAction(toggleAction)
-            .addAction(stopAction)
+            .addAction(prevAction)    // index 0
+            .addAction(toggleAction)  // index 1
+            .addAction(nextAction)    // index 2
             .setStyle(
                 MediaStyle()
                     .setMediaSession(mediaSession.sessionToken)
-                    .setShowActionsInCompactView(0)  // show play/pause in compact view
+                    .setShowActionsInCompactView(0, 1, 2)  // prev, play/pause, next
             )
             .build()
     }

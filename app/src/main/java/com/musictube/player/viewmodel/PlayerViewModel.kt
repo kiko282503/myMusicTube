@@ -33,6 +33,11 @@ class PlayerViewModel @Inject constructor(
     val currentPosition: StateFlow<Long> = playerManager.currentPosition
     val duration: StateFlow<Long> = playerManager.duration
     val volume: StateFlow<Float> = playerManager.volume
+    val hasPrevious: StateFlow<Boolean> = playerManager.hasPrevious
+    val hasNext: StateFlow<Boolean> = playerManager.hasNext
+    val isShuffleOn: StateFlow<Boolean> = playerManager.isShuffleOn
+    val isRepeatOn: StateFlow<Boolean> = playerManager.isRepeatOn
+    val playQueueSize: StateFlow<Int> = playerManager.playQueueSize
 
     // Expose download status/progress from DownloadManager
     val downloadStatus: StateFlow<Map<String, DownloadStatus>> = downloadManager.downloadStatus
@@ -87,6 +92,10 @@ class PlayerViewModel @Inject constructor(
     fun stop() { playerManager.stop() }
     fun seekTo(position: Long) { playerManager.seekTo(position) }
     fun setVolume(volume: Float) { playerManager.setVolume(volume) }
+    fun playNext() = playerManager.playNext()
+    fun playPrevious() = playerManager.playPrevious()
+    fun toggleShuffle() = playerManager.toggleShuffle()
+    fun toggleRepeat() = playerManager.toggleRepeat()
 
     fun downloadCurrentSong() {
         val song = currentSong.value ?: return

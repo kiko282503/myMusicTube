@@ -105,6 +105,13 @@ class HomeViewModel @Inject constructor(
     // Expose current playback state so HomeScreen can show a Now Playing bar.
     val currentSong = playerManager.currentSong
     val isPlayingNow = playerManager.isPlaying
+    val currentPosition: StateFlow<Long> = playerManager.currentPosition
+    val duration: StateFlow<Long> = playerManager.duration
+    val playQueueSize: StateFlow<Int> = playerManager.playQueueSize
+
+    fun pause() = playerManager.pause()
+    fun resume() = playerManager.resume()
+    fun playNext() = playerManager.playNext()
 
     init {
         ensureOfflinePlaylist()

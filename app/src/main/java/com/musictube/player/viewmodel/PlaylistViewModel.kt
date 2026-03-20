@@ -75,26 +75,18 @@ class PlaylistViewModel @Inject constructor(
     val message: StateFlow<String?> = _message.asStateFlow()
 
     fun playSong(song: Song) {
+        val allSongs = songs.value
+        val index = allSongs.indexOfFirst { it.id == song.id }.coerceAtLeast(0)
+        playerManager.setPlaylistQueue(allSongs, index)
         viewModelScope.launch {
-            val localPath = song.filePath
-            if (song.isDownloaded && !localPath.isNullOrBlank()) {
-                playerManager.playSong(song)
-            } else {
-                val videoId = song.id.removePrefix("yt_").removePrefix("dl_")
-                playerManager.playYouTubeAudioStream(
-                    videoId = videoId,
-                    title = song.title,
-                    artist = song.artist,
-                    thumbnailUrl = song.thumbnailUrl
-                )
-            }
             repository.incrementPlayCount(song.id)
         }
     }
 
     fun playPlaylistFromStart() {
-        val first = songs.value.firstOrNull() ?: return
-        playSong(first)
+        val allSongs = songs.value
+        if (allSongs.isEmpty()) return
+        playerManager.setPlaylistQueue(allSongs, 0)
     }
 
     fun removeSong(songId: String) {
