@@ -11,8 +11,12 @@ import com.musictube.player.service.DownloadStatus
 import com.musictube.player.service.MusicPlayerManager
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
@@ -43,6 +47,30 @@ class PlayerViewModel @Inject constructor(
 
     private val _errorMessage = MutableStateFlow("")
     val errorMessage: StateFlow<String> = _errorMessage.asStateFlow()
+
+    /** Emits true when the current song is already present in any playlist. */
+    val isCurrentSongInAnyPlaylist: StateFlow<Boolean> = currentSong
+        .flatMapLatest { song ->
+            if (song == null) flowOf(false)
+            else musicRepository.isSongInAnyPlaylist(song.id)
+        }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
+
+    init {
+        // Sync download-status indicator whenever the active song changes.
+        // We always check the DB because the transient Song object created by
+        // playYouTubeAudioStream() has isDownloaded = false by default.
+        viewModelScope.launch {
+            currentSong.collect { song ->
+                if (song != null) {
+                    val dbSong = musicRepository.getSongById(song.id)
+                    _currentDownloadStatus.value =
+                        if (song.isDownloaded || dbSong?.isDownloaded == true) DownloadStatus.COMPLETED
+                        else DownloadStatus.IDLE
+                }
+            }
+        }
+    }
 
     /** Returns the singleton WebView from MusicPlayerManager — creates it on first call. */
     fun getOrCreateWebView(context: Context): WebView = playerManager.getOrCreateWebView(context)
