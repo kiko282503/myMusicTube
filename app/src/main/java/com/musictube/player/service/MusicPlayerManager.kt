@@ -26,8 +26,12 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.stateIn
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -58,6 +62,37 @@ class MusicPlayerManager @Inject constructor(
 
     private val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
 
+    // Playlist queue
+    private val _playQueue = MutableStateFlow<List<Song>>(emptyList())
+    private val _queueIndex = MutableStateFlow(-1)
+    private var _isPlayingViaQueue = false
+
+    // Shuffle & repeat modes
+    private val _isShuffleOn = MutableStateFlow(false)
+    val isShuffleOn: StateFlow<Boolean> = _isShuffleOn.asStateFlow()
+
+    private val _isRepeatOn = MutableStateFlow(false)
+    val isRepeatOn: StateFlow<Boolean> = _isRepeatOn.asStateFlow()
+
+    // Tracks which song IDs have been played in the current shuffle cycle
+    private val _shuffleHistory = mutableListOf<Int>()
+
+    fun toggleShuffle() { _isShuffleOn.value = !_isShuffleOn.value }
+    fun toggleRepeat()  { _isRepeatOn.value  = !_isRepeatOn.value  }
+
+    /** Number of songs in the active queue. 0 when no queue is set. */
+    val playQueueSize: StateFlow<Int> = _playQueue
+        .map { it.size }
+        .stateIn(scope, SharingStarted.Eagerly, 0)
+
+    val hasPrevious: StateFlow<Boolean> = combine(_playQueue, _queueIndex) { queue, idx ->
+        queue.isNotEmpty() && idx > 0
+    }.stateIn(scope, SharingStarted.Eagerly, false)
+
+    val hasNext: StateFlow<Boolean> = combine(_playQueue, _queueIndex) { queue, idx ->
+        queue.isNotEmpty() && (idx < queue.size - 1 || _isRepeatOn.value || _isShuffleOn.value)
+    }.stateIn(scope, SharingStarted.Eagerly, false)
+
     private val exoPlayer: ExoPlayer by lazy {
         ExoPlayer.Builder(context).build().apply {
             addListener(object : Player.Listener {
@@ -74,8 +109,14 @@ class MusicPlayerManager @Inject constructor(
                         Player.STATE_ENDED -> {
                             _isPlaying.value = false
                             _currentPosition.value = 0L
-                            exoPlayer.seekTo(0)
-                            exoPlayer.pause()
+                            val qIdx = _queueIndex.value
+                            val qSize = _playQueue.value.size
+                            if (qSize > 0) {
+                                advanceQueue()
+                            } else {
+                                exoPlayer.seekTo(0)
+                                exoPlayer.pause()
+                            }
                         }
                         else -> {}
                     }
@@ -99,6 +140,10 @@ class MusicPlayerManager @Inject constructor(
     }
 
     fun playSong(song: Song) {
+        if (!_isPlayingViaQueue) {
+            _playQueue.value = emptyList()
+            _queueIndex.value = -1
+        }
         val previousSongId = _currentSong.value?.id
         val currentDuration = _duration.value
         
@@ -123,6 +168,113 @@ class MusicPlayerManager @Inject constructor(
         
         // Always start notification service when playing a song
         startNotificationService(song.title, song.artist, song.thumbnailUrl)
+    }
+
+    fun setPlaylistQueue(songs: List<Song>, startIndex: Int) {
+        if (songs.isEmpty()) return
+        val clampedIndex = startIndex.coerceIn(0, songs.size - 1)
+        _playQueue.value = songs
+        _queueIndex.value = clampedIndex
+        _shuffleHistory.clear()
+        _shuffleHistory.add(clampedIndex)
+        playQueueItemAt(clampedIndex)
+    }
+
+    /** Advance to the next song respecting shuffle and repeat modes. */
+    private fun advanceQueue() {
+        val queue = _playQueue.value
+        val qSize = queue.size
+        if (qSize == 0) return
+        val currentIdx = _queueIndex.value
+
+        if (_isShuffleOn.value) {
+            // Always ensure the currently-playing index is recorded so it cannot be
+            // immediately re-picked.
+            if (currentIdx >= 0 && currentIdx !in _shuffleHistory) {
+                _shuffleHistory.add(currentIdx)
+            }
+            android.util.Log.d("ShuffleQueue", "History after finishing idx=$currentIdx: $_shuffleHistory (qSize=$qSize, repeat=${_isRepeatOn.value})")
+
+            // All songs in the playlist have been played.
+            if (_shuffleHistory.size >= qSize) {
+                if (_isRepeatOn.value) {
+                    // Repeat ON → start a new cycle, avoid repeating the last song immediately.
+                    android.util.Log.d("ShuffleQueue", "All songs played — repeat ON, starting new cycle")
+                    _shuffleHistory.clear()
+                    if (currentIdx >= 0) _shuffleHistory.add(currentIdx)
+                } else {
+                    // Repeat OFF → stop after the last song.
+                    android.util.Log.d("ShuffleQueue", "All songs played — repeat OFF, stopping")
+                    return
+                }
+            }
+
+            val available = (0 until qSize).filter { it !in _shuffleHistory }
+            if (available.isEmpty()) return   // single-song edge-case guard
+            val nextIdx = available.random()
+            android.util.Log.d("ShuffleQueue", "Picking idx=$nextIdx (${queue[nextIdx].title}) from available=$available")
+            _shuffleHistory.add(nextIdx)
+            _queueIndex.value = nextIdx
+            playQueueItemAt(nextIdx)
+        } else if (currentIdx < qSize - 1) {
+            // Normal sequential advance
+            val nextIdx = currentIdx + 1
+            android.util.Log.d("ShuffleQueue", "Sequential: idx $currentIdx → $nextIdx (${queue[nextIdx].title})")
+            _queueIndex.value = nextIdx
+            playQueueItemAt(nextIdx)
+        } else if (_isRepeatOn.value) {
+            // At the end and repeat is on — wrap back to the start
+            android.util.Log.d("ShuffleQueue", "Sequential end — repeat ON, wrapping to 0")
+            _queueIndex.value = 0
+            playQueueItemAt(0)
+        } else {
+            android.util.Log.d("ShuffleQueue", "Sequential end — repeat OFF, stopping")
+        }
+    }
+
+    fun playNext() {
+        val idx = _queueIndex.value
+        val queue = _playQueue.value
+        if (_isShuffleOn.value && queue.isNotEmpty()) {
+            if (idx >= 0 && idx !in _shuffleHistory) _shuffleHistory.add(idx)
+            if (_shuffleHistory.size >= queue.size) {
+                _shuffleHistory.clear()
+                if (idx >= 0) _shuffleHistory.add(idx)
+            }
+            val available = (0 until queue.size).filter { it !in _shuffleHistory }
+            if (available.isEmpty()) return
+            val nextIdx = available.random()
+            _shuffleHistory.add(nextIdx)
+            _queueIndex.value = nextIdx
+            playQueueItemAt(nextIdx)
+        } else if (idx < queue.size - 1) {
+            _queueIndex.value = idx + 1
+            playQueueItemAt(idx + 1)
+        } else if (_isRepeatOn.value && queue.isNotEmpty()) {
+            _queueIndex.value = 0
+            playQueueItemAt(0)
+        }
+    }
+
+    fun playPrevious() {
+        val idx = _queueIndex.value
+        if (idx > 0) {
+            _queueIndex.value = idx - 1
+            playQueueItemAt(idx - 1)
+        }
+    }
+
+    private fun playQueueItemAt(index: Int) {
+        val song = _playQueue.value.getOrNull(index) ?: return
+        _isPlayingViaQueue = true
+        val localPath = song.filePath
+        if (song.isDownloaded && !localPath.isNullOrBlank()) {
+            playSong(song)
+        } else {
+            val videoId = song.id.removePrefix("yt_").removePrefix("dl_")
+            playYouTubeAudioStream(videoId, song.title, song.artist, song.thumbnailUrl)
+        }
+        _isPlayingViaQueue = false
     }
 
     // Persistent WebView — survives navigation changes so audio keeps playing on back press
@@ -340,6 +492,10 @@ class MusicPlayerManager @Inject constructor(
     fun playYouTubeAudioStream(videoId: String, title: String, artist: String, thumbnailUrl: String?) {
         android.util.Log.i("MusicPlayerManager", "Loading music.youtube.com for: $title ($videoId)")
 
+        if (!_isPlayingViaQueue) {
+            _playQueue.value = emptyList()
+            _queueIndex.value = -1
+        }
         // Remember for stop→play
         _lastVideoId = videoId
         _lastTitle = title
@@ -389,6 +545,9 @@ class MusicPlayerManager @Inject constructor(
             scope.launch {
                 _isPlaying.value = false
                 _currentPosition.value = 0L
+                if (_playQueue.value.isNotEmpty()) {
+                    advanceQueue()
+                }
             }
         }
 
