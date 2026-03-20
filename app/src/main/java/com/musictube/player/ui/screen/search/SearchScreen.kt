@@ -3,6 +3,7 @@ package com.musictube.player.ui.screen.search
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
@@ -17,6 +18,7 @@ import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
+import com.musictube.player.service.DownloadStatus
 import com.musictube.player.ui.component.SearchResultItem
 import com.musictube.player.viewmodel.SearchViewModel
 
@@ -30,9 +32,31 @@ fun SearchScreen(
     val searchQuery by viewModel.searchQuery.collectAsState()
     val searchResults by viewModel.searchResults.collectAsState()
     val isLoading by viewModel.isLoading.collectAsState()
+    val isLoadingMore by viewModel.isLoadingMore.collectAsState()
+    val canLoadMore by viewModel.canLoadMore.collectAsState()
     val downloadStatus by viewModel.downloadStatus.collectAsState()
+    val downloadProgress by viewModel.downloadProgress.collectAsState()
     val errorMessage by viewModel.errorMessage.collectAsState()
     val keyboardController = LocalSoftwareKeyboardController.current
+    
+    // Lazy list state for infinite scroll
+    val lazyListState = rememberLazyListState()
+    
+    // Detect when user scrolls near the end and load more results
+    LaunchedEffect(lazyListState) {
+        snapshotFlow { lazyListState.layoutInfo.visibleItemsInfo }
+            .collect { visibleItems ->
+                if (visibleItems.isNotEmpty()) {
+                    val lastVisibleIndex = lazyListState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: -1
+                    val totalItems = lazyListState.layoutInfo.totalItemsCount - 1
+                    
+                    // Load more only when scrolled near the end AND there are more results available
+                    if (lastVisibleIndex >= totalItems - 3 && !isLoading && !isLoadingMore && canLoadMore && searchResults.isNotEmpty()) {
+                        viewModel.loadMoreResults()
+                    }
+                }
+            }
+    }
     
     Scaffold(
         topBar = {
@@ -114,6 +138,7 @@ fun SearchScreen(
                     
                     searchResults.isNotEmpty() -> {
                         LazyColumn(
+                            state = lazyListState,
                             contentPadding = PaddingValues(
                                 start = 16.dp,
                                 end = 16.dp,
@@ -125,7 +150,8 @@ fun SearchScreen(
                             items(searchResults) { result ->
                                 SearchResultItem(
                                     searchResult = result,
-                                    downloadStatus = downloadStatus[result.id] ?: com.musictube.player.viewmodel.DownloadStatus.IDLE,
+                                    downloadStatus = downloadStatus[result.id] ?: DownloadStatus.IDLE,
+                                    downloadProgress = downloadProgress[result.id] ?: 0,
                                     onDownload = { viewModel.downloadSong(result) },
                                     onPlay = {
                                         viewModel.playSearchResult(result)
@@ -133,6 +159,22 @@ fun SearchScreen(
                                         onNavigateToPlayer()
                                     }
                                 )
+                            }
+                            
+                            // Show loading indicator at the bottom when fetching more
+                            if (isLoadingMore && searchResults.isNotEmpty()) {
+                                item {
+                                    Box(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(16.dp),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        CircularProgressIndicator(
+                                            modifier = Modifier.size(32.dp)
+                                        )
+                                    }
+                                }
                             }
                         }
                     }

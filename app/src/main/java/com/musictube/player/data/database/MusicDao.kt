@@ -48,6 +48,12 @@ interface PlaylistDao {
     
     @Query("SELECT * FROM playlists WHERE id = :id")
     suspend fun getPlaylistById(id: String): Playlist?
+
+    @Query("SELECT * FROM playlists WHERE id = :id")
+    fun getPlaylistByIdFlow(id: String): Flow<Playlist?>
+
+    @Query("SELECT * FROM playlists WHERE name = :name COLLATE NOCASE LIMIT 1")
+    suspend fun getPlaylistByName(name: String): Playlist?
     
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertPlaylist(playlist: Playlist)
@@ -75,4 +81,16 @@ interface PlaylistDao {
     
     @Query("DELETE FROM playlist_songs WHERE playlistId = :playlistId")
     suspend fun clearPlaylist(playlistId: String)
+
+    @Query("SELECT COUNT(*) FROM playlist_songs WHERE playlistId = :playlistId")
+    suspend fun getPlaylistSongCount(playlistId: String): Int
+
+    @Query("SELECT MAX(position) FROM playlist_songs WHERE playlistId = :playlistId")
+    suspend fun getMaxPositionInPlaylist(playlistId: String): Int?
+
+    @Query("SELECT COUNT(*) FROM playlist_songs WHERE playlistId = :playlistId AND songId = :songId")
+    suspend fun isSongInPlaylist(playlistId: String, songId: String): Int
+
+    @Query("UPDATE playlists SET songCount = :songCount WHERE id = :playlistId")
+    suspend fun updatePlaylistSongCount(playlistId: String, songCount: Int)
 }

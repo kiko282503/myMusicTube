@@ -4,10 +4,12 @@ import android.content.Context
 import android.provider.MediaStore
 import com.musictube.player.data.database.SongDao
 import com.musictube.player.data.database.PlaylistDao
+import com.musictube.player.data.model.PlaylistSong
 import com.musictube.player.data.model.Song
 import com.musictube.player.data.model.Playlist
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.util.*
@@ -99,18 +101,74 @@ class MusicRepository @Inject constructor(
     
     // Playlist methods
     fun getAllPlaylists(): Flow<List<Playlist>> = playlistDao.getAllPlaylists()
+        .map { playlists ->
+            playlists
+                .groupBy { it.name.trim().lowercase(Locale.getDefault()) }
+                .values
+                .map { sameName ->
+                    sameName.maxWithOrNull(
+                        compareBy<Playlist>({ it.songCount }, { it.dateCreated })
+                    ) ?: sameName.first()
+                }
+                .sortedByDescending { it.dateCreated }
+        }
+
+    fun getPlaylistByIdFlow(playlistId: String): Flow<Playlist?> = playlistDao.getPlaylistByIdFlow(playlistId)
     
     fun getPlaylistSongs(playlistId: String): Flow<List<Song>> = 
         playlistDao.getPlaylistSongs(playlistId)
     
     suspend fun createPlaylist(name: String, description: String? = null): String {
+        val normalizedName = name.trim()
+        val existing = playlistDao.getPlaylistByName(normalizedName)
+        if (existing != null) return existing.id
+
         val playlistId = UUID.randomUUID().toString()
         val playlist = Playlist(
             id = playlistId,
-            name = name,
+            name = normalizedName,
             description = description
         )
         playlistDao.insertPlaylist(playlist)
         return playlistId
+    }
+
+    suspend fun addSongToPlaylist(playlistId: String, song: Song): Boolean {
+        // Ensure the song exists in songs table.
+        songDao.insertSong(song)
+        return addExistingSongToPlaylist(playlistId, song.id)
+    }
+
+    suspend fun addExistingSongToPlaylist(playlistId: String, songId: String): Boolean {
+        if (playlistDao.isSongInPlaylist(playlistId, songId) > 0) {
+            return false
+        }
+
+        val nextPosition = (playlistDao.getMaxPositionInPlaylist(playlistId) ?: -1) + 1
+        playlistDao.addSongToPlaylist(
+            PlaylistSong(
+                playlistId = playlistId,
+                songId = songId,
+                position = nextPosition
+            )
+        )
+        refreshPlaylistCount(playlistId)
+        return true
+    }
+
+    suspend fun removeSongFromPlaylist(playlistId: String, songId: String) {
+        playlistDao.removeSongFromPlaylist(playlistId, songId)
+        refreshPlaylistCount(playlistId)
+    }
+
+    suspend fun deletePlaylist(playlistId: String) {
+        val playlist = playlistDao.getPlaylistById(playlistId) ?: return
+        playlistDao.clearPlaylist(playlistId)
+        playlistDao.deletePlaylist(playlist)
+    }
+
+    private suspend fun refreshPlaylistCount(playlistId: String) {
+        val count = playlistDao.getPlaylistSongCount(playlistId)
+        playlistDao.updatePlaylistSongCount(playlistId, count)
     }
 }

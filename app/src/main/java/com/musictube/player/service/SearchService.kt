@@ -22,6 +22,9 @@ class SearchService @Inject constructor() {
         .readTimeout(15, TimeUnit.SECONDS)
         .build()
 
+    private val baseContextJson = """{"client":{"clientName":"WEB_REMIX","clientVersion":"1.20240101.01.00","hl":"en","gl":"US"}}"""
+    private val searchUrl = "https://music.youtube.com/youtubei/v1/search?prettyPrint=false"
+
     // songsOnly=true adds the YouTube Music "Songs" filter so only individual tracks are returned
     suspend fun searchMusic(query: String, songsOnly: Boolean = false): List<SearchResult> = withContext(Dispatchers.IO) {
         try {
@@ -35,12 +38,60 @@ class SearchService @Inject constructor() {
     private fun searchYouTube(query: String, songsOnly: Boolean): List<SearchResult> {
         Log.d("SearchService", "Searching YouTube Music for: $query (songsOnly=$songsOnly)")
 
-        val safeQuery = query.replace("\\", "\\\\").replace("\"", "\\\"")        // EgWKAQIIAWoKEAkQBRAKEAMQBA%3D%3D is the YouTube Music "Songs" search filter
+        val safeQuery = query.replace("\\", "\\\\").replace("\"", "\\\"")
         val paramsField = if (songsOnly) ",\"params\":\"EgWKAQIIAWoKEAkQBRAKEAMQBA%3D%3D\"" else ""
-        val body = """{"context":{"client":{"clientName":"WEB_REMIX","clientVersion":"1.20240101.01.00","hl":"en","gl":"US"}},"query":"$safeQuery"$paramsField}"""
+        val body = """{"context":$baseContextJson,"query":"$safeQuery"$paramsField}"""
 
+        val collected = mutableListOf<SearchResult>()
+        val seenTokens = mutableSetOf<String>()
+        var continuationToken: String? = null
+
+        val firstPageJson = executeSearchRequest(body) ?: return emptyList()
+        try {
+            val root = JsonParser.parseString(firstPageJson).asJsonObject
+            findMusicListItemRenderers(root, collected, songsOnly)
+            continuationToken = findFirstContinuationToken(root)
+            continuationToken?.let { seenTokens.add(it) }
+        } catch (e: Exception) {
+            Log.e("SearchService", "Error parsing initial YT Music response", e)
+            return emptyList()
+        }
+
+        var page = 1
+        val maxPages = 6
+        val maxResults = 200
+        while (continuationToken != null && page < maxPages && collected.size < maxResults) {
+            val safeToken = continuationToken.replace("\\", "\\\\").replace("\"", "\\\"")
+            val continuationBody = """{"context":$baseContextJson,"continuation":"$safeToken"}"""
+            val continuationJson = executeSearchRequest(continuationBody) ?: break
+
+            try {
+                val continuationRoot = JsonParser.parseString(continuationJson).asJsonObject
+                findMusicListItemRenderers(continuationRoot, collected, songsOnly)
+                val nextToken = findFirstContinuationToken(continuationRoot)
+                continuationToken = if (nextToken == null || !seenTokens.add(nextToken)) {
+                    null
+                } else {
+                    nextToken
+                }
+            } catch (e: Exception) {
+                Log.e("SearchService", "Error parsing continuation page $page", e)
+                break
+            }
+
+            page++
+        }
+
+        val uniqueResults = collected
+            .distinctBy { it.id }
+            .take(maxResults)
+        Log.d("SearchService", "Extracted ${uniqueResults.size} unique results across $page pages")
+        return uniqueResults
+    }
+
+    private fun executeSearchRequest(body: String): String? {
         val request = okhttp3.Request.Builder()
-            .url("https://music.youtube.com/youtubei/v1/search?prettyPrint=false")
+            .url(searchUrl)
             .post(body.toRequestBody("application/json".toMediaType()))
             .addHeader("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
             .addHeader("X-YouTube-Client-Name", "67")
@@ -52,54 +103,56 @@ class SearchService @Inject constructor() {
         val response = httpClient.newCall(request).execute()
         if (!response.isSuccessful) {
             Log.w("SearchService", "YT Music search responded ${response.code}")
-            return emptyList()
+            return null
         }
 
-        val json = response.body?.string() ?: return emptyList()
-        Log.d("SearchService", "Got YT Music response, length: ${json.length}")
-
-        val results = mutableListOf<SearchResult>()
-        try {
-            val root = JsonParser.parseString(json).asJsonObject
-            findMusicListItemRenderers(root, results)
-        } catch (e: Exception) {
-            Log.e("SearchService", "Error parsing YT Music response", e)
-        }
-        Log.d("SearchService", "Extracted ${results.size} results")
-        return results
+        return response.body?.string()
     }
 
     // Recursively walk the JSON tree looking for musicResponsiveListItemRenderer objects
-    private fun findMusicListItemRenderers(element: JsonElement, results: MutableList<SearchResult>) {
-        if (results.size >= 20) return
+    private fun findMusicListItemRenderers(
+        element: JsonElement,
+        results: MutableList<SearchResult>,
+        songsOnly: Boolean
+    ) {
         if (element.isJsonObject) {
             val obj = element.asJsonObject
             if (obj.has("musicResponsiveListItemRenderer")) {
-                parseMusicListItemRenderer(obj.getAsJsonObject("musicResponsiveListItemRenderer"))?.let { results.add(it) }
+                parseMusicListItemRenderer(
+                    renderer = obj.getAsJsonObject("musicResponsiveListItemRenderer"),
+                    songsOnly = songsOnly
+                )?.let { results.add(it) }
             } else {
                 for ((_, value) in obj.entrySet()) {
-                    findMusicListItemRenderers(value, results)
+                    findMusicListItemRenderers(value, results, songsOnly)
                 }
             }
         } else if (element.isJsonArray) {
             for (item in element.asJsonArray) {
-                findMusicListItemRenderers(item, results)
+                findMusicListItemRenderers(item, results, songsOnly)
             }
         }
     }
 
-    private fun parseMusicListItemRenderer(renderer: JsonObject): SearchResult? {
+    private fun parseMusicListItemRenderer(renderer: JsonObject, songsOnly: Boolean): SearchResult? {
         return try {
-            // Check type from second flex column — skip playlists, albums, artists
             val flexColsCheck = renderer.getAsJsonArray("flexColumns")
-            if (flexColsCheck != null && flexColsCheck.size() > 1) {
-                val runs = flexColsCheck[1]?.asJsonObject
+            val typeText = if (flexColsCheck != null && flexColsCheck.size() > 1) {
+                flexColsCheck[1]?.asJsonObject
                     ?.getAsJsonObject("musicResponsiveListItemFlexColumnRenderer")
                     ?.getAsJsonObject("text")
                     ?.getAsJsonArray("runs")
-                val typeText = runs?.firstOrNull()?.asJsonObject?.get("text")?.asString?.lowercase() ?: ""
-                // Only keep items explicitly labelled "song" (or no type label).
-                // This filters out Video, Episode, Playlist, Album, EP, Single, Artist, etc.
+                    ?.firstOrNull()?.asJsonObject
+                    ?.get("text")?.asString
+                    ?.trim()
+                    ?.lowercase()
+                    .orEmpty()
+            } else {
+                ""
+            }
+
+            // For song-only mode, skip non-song entities like playlists/albums/artists/videos.
+            if (songsOnly) {
                 if (typeText.isNotEmpty() && typeText != "song") return null
             }
 
@@ -121,7 +174,25 @@ class SearchService @Inject constructor() {
                     ?.getAsJsonObject("navigationEndpoint")
                     ?.getAsJsonObject("watchEndpoint")
                     ?.get("videoId")?.asString
-                ?: return null
+
+            val browseId = renderer.getAsJsonArray("flexColumns")
+                ?.firstOrNull()?.asJsonObject
+                ?.getAsJsonObject("musicResponsiveListItemFlexColumnRenderer")
+                ?.getAsJsonObject("text")
+                ?.getAsJsonArray("runs")
+                ?.firstOrNull()?.asJsonObject
+                ?.getAsJsonObject("navigationEndpoint")
+                ?.getAsJsonObject("browseEndpoint")
+                ?.get("browseId")
+                ?.asString
+
+            if (videoId.isNullOrBlank() && browseId.isNullOrBlank()) return null
+
+            val resultId = if (!videoId.isNullOrBlank()) {
+                videoId
+            } else {
+                "browse_$browseId"
+            }
 
             val flexCols = renderer.getAsJsonArray("flexColumns") ?: return null
 
@@ -158,16 +229,46 @@ class SearchService @Inject constructor() {
                 ?.get("text")?.asString ?: ""
 
             SearchResult(
-                id = videoId,
+                id = resultId,
                 title = title,
                 artist = artistName,
                 duration = duration,
                 thumbnailUrl = thumbnail,
-                videoUrl = "https://music.youtube.com/watch?v=$videoId",
-                audioUrl = null
+                videoUrl = if (!videoId.isNullOrBlank()) {
+                    "https://music.youtube.com/watch?v=$videoId"
+                } else {
+                    ""
+                },
+                audioUrl = null,
+                itemType = typeText.ifBlank { if (!videoId.isNullOrBlank()) "song" else "browse" },
+                isPlayable = !videoId.isNullOrBlank()
             )
         } catch (e: Exception) {
             null
         }
+    }
+
+    private fun findFirstContinuationToken(element: JsonElement): String? {
+        if (element.isJsonObject) {
+            val obj = element.asJsonObject
+
+            val token = obj.getAsJsonObject("continuationEndpoint")
+                ?.getAsJsonObject("continuationCommand")
+                ?.get("token")
+                ?.asString
+            if (!token.isNullOrBlank()) return token
+
+            for ((_, value) in obj.entrySet()) {
+                val nested = findFirstContinuationToken(value)
+                if (nested != null) return nested
+            }
+        } else if (element.isJsonArray) {
+            for (item in element.asJsonArray) {
+                val nested = findFirstContinuationToken(item)
+                if (nested != null) return nested
+            }
+        }
+
+        return null
     }
 }

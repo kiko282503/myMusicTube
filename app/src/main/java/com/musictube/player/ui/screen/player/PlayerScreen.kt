@@ -3,8 +3,12 @@
 import android.content.Context
 import android.media.AudioManager
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Stop
@@ -20,6 +24,8 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
+import com.musictube.player.data.model.Playlist
+import com.musictube.player.service.DownloadStatus
 import com.musictube.player.viewmodel.PlayerViewModel
 
 // Helper function to format time
@@ -40,7 +46,13 @@ fun PlayerScreen(
     val isPlaying by viewModel.isPlaying.collectAsState()
     val currentPosition by viewModel.currentPosition.collectAsState()
     val duration by viewModel.duration.collectAsState()
+    val downloadStatus by viewModel.currentDownloadStatus.collectAsState()
+    val downloadProgress by viewModel.currentDownloadProgress.collectAsState()
+    val playlists by viewModel.getPlaylistList().collectAsState(initial = emptyList())
     val context = LocalContext.current
+    
+    var showPlaylistDialog by remember { mutableStateOf(false) }
+    var newPlaylistName by remember { mutableStateOf("") }
 
     // Ensure the WebView is created (and permanently attached to the Activity content view)
     // whenever a YouTube song is active. No need to host it in Compose — GONE visibility
@@ -213,7 +225,70 @@ fun PlayerScreen(
                     Spacer(modifier = Modifier.size(56.dp))
                 }
                 
-                // Artwork / WebView area
+                // Download and Add to Playlist buttons
+                Spacer(modifier = Modifier.height(16.dp))
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    // Download button
+                    Button(
+                        onClick = { viewModel.downloadCurrentSong() },
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(48.dp),
+                        enabled = downloadStatus != DownloadStatus.DOWNLOADING
+                    ) {
+                        when (downloadStatus) {
+                            DownloadStatus.IDLE -> {
+                                Row(
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Icon(Icons.Default.Download, contentDescription = "Download")
+                                    Text("Download")
+                                }
+                            }
+                            DownloadStatus.DOWNLOADING -> {
+                                Row(
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    CircularProgressIndicator(
+                                        modifier = Modifier.size(20.dp),
+                                        strokeWidth = 2.dp
+                                    )
+                                    Text("$downloadProgress%")
+                                }
+                            }
+                            DownloadStatus.COMPLETED -> {
+                                Text("Downloaded ✓")
+                            }
+                            DownloadStatus.FAILED -> {
+                                Text("Download Failed")
+                            }
+                        }
+                    }
+                    
+                    // Add to Playlist button
+                    Button(
+                        onClick = { showPlaylistDialog = true },
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(48.dp)
+                    ) {
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(Icons.Default.Add, contentDescription = "Add to Playlist")
+                            Text("Playlist")
+                        }
+                    }
+                }
+                
                 Spacer(modifier = Modifier.height(16.dp))
 
                 Card(
@@ -291,4 +366,73 @@ fun PlayerScreen(
             }
         }
     }
+    
+    // Playlist selection dialog
+    if (showPlaylistDialog) {
+        AlertDialog(
+            onDismissRequest = { showPlaylistDialog = false },
+            title = { Text("Select Playlist") },
+            text = {
+                if (playlists.isEmpty()) {
+                    Column {
+                        Text("No playlists yet. Create one to add this song.")
+                        Spacer(modifier = Modifier.height(16.dp))
+                        TextField(
+                            value = newPlaylistName,
+                            onValueChange = { newPlaylistName = it },
+                            placeholder = { Text("Playlist name") },
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    }
+                } else {
+                    LazyColumn {
+                        items(playlists) { playlist ->
+                            TextButton(
+                                onClick = {
+                                    viewModel.addCurrentSongToPlaylist(playlist.id)
+                                    showPlaylistDialog = false
+                                },
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Text(
+                                    text = playlist.name,
+                                    modifier = Modifier.fillMaxWidth(),
+                                    textAlign = TextAlign.Start
+                                )
+                            }
+                        }
+                        item {
+                            Divider()
+                            TextButton(
+                                onClick = { },
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Text("New Playlist")
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                if (playlists.isEmpty() && newPlaylistName.isNotBlank()) {
+                    Button(
+                        onClick = {
+                            viewModel.createPlaylist(newPlaylistName)
+                            newPlaylistName = ""
+                            showPlaylistDialog = false
+                        }
+                    ) {
+                        Text("Create & Add")
+                    }
+                } else {
+                    Button(
+                        onClick = { showPlaylistDialog = false }
+                    ) {
+                        Text("Cancel")
+                    }
+                }
+            }
+        )
+    }
 }
+

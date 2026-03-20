@@ -23,6 +23,7 @@ import com.google.accompanist.permissions.rememberPermissionState
 import com.musictube.player.service.MusicPlayerManager
 import com.musictube.player.ui.screen.home.HomeScreen
 import com.musictube.player.ui.screen.player.PlayerScreen
+import com.musictube.player.ui.screen.playlist.PlaylistScreen
 import com.musictube.player.ui.screen.quickpicks.QuickPicksScreen
 import com.musictube.player.ui.screen.search.SearchScreen
 import com.musictube.player.ui.theme.MusicTubeTheme
@@ -128,7 +129,8 @@ fun MusicTubeApp(
             HomeScreen(
                 onNavigateToPlayer = { navController.navigate("player") },
                 onNavigateToSearch = { navController.navigate("search") },
-                onNavigateToQuickPicks = { navController.navigate("quick_picks") }
+                onNavigateToQuickPicks = { navController.navigate("quick_picks") },
+                onNavigateToPlaylist = { playlistId -> navController.navigate("playlist/$playlistId") }
             )
         }
         
@@ -147,6 +149,13 @@ fun MusicTubeApp(
 
         composable("quick_picks") {
             QuickPicksScreen(
+                onNavigateBack = { navController.popBackStack() },
+                onNavigateToPlayer = { navController.navigate("player") }
+            )
+        }
+
+        composable("playlist/{playlistId}") {
+            PlaylistScreen(
                 onNavigateBack = { navController.popBackStack() },
                 onNavigateToPlayer = { navController.navigate("player") }
             )

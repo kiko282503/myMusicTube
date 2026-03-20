@@ -51,5 +51,7 @@ data class SearchResult(
     val duration: String,
     val thumbnailUrl: String,
     val videoUrl: String,
-    val audioUrl: String? = null
+    val audioUrl: String? = null,
+    val itemType: String = "song",
+    val isPlayable: Boolean = true
 )

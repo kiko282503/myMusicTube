@@ -1,12 +1,16 @@
 package com.musictube.player.ui.screen.home
 
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.LibraryMusic
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
@@ -22,7 +26,9 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import coil.compose.AsyncImage
+import com.musictube.player.data.model.Playlist
 import com.musictube.player.ui.component.SearchResultItem
+import com.musictube.player.service.DownloadStatus
 import com.musictube.player.viewmodel.HomeViewModel
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -31,14 +37,36 @@ fun HomeScreen(
     onNavigateToPlayer: () -> Unit,
     onNavigateToSearch: () -> Unit,
     onNavigateToQuickPicks: () -> Unit,
+    onNavigateToPlaylist: (String) -> Unit,
     viewModel: HomeViewModel = hiltViewModel()
 ) {
     val trendingSongs by viewModel.trendingSongs.collectAsState()
     val quickPicks by viewModel.quickPicks.collectAsState()
+    val playlists by viewModel.playlists.collectAsState()
+    val offlinePlaylistId by viewModel.offlinePlaylistId.collectAsState()
+    val offlineSongCount by viewModel.offlineSongCount.collectAsState()
     val isLoading by viewModel.isLoading.collectAsState()
     val isLoadingMore by viewModel.isLoadingMore.collectAsState()
+    val downloadStatus by viewModel.downloadStatus.collectAsState()
+    val downloadProgress by viewModel.downloadProgress.collectAsState()
     val nowPlayingSong by viewModel.currentSong.collectAsState()
     val isPlayingNow by viewModel.isPlayingNow.collectAsState()
+
+    val homePlaylists by remember(playlists, offlinePlaylistId) {
+        derivedStateOf {
+            val offline = playlists.firstOrNull { it.id == offlinePlaylistId }
+            val userPlaylists = playlists
+                .asSequence()
+                .filter { it.id != offlinePlaylistId }
+                .sortedByDescending { it.dateCreated }
+                .toList()
+
+            buildList {
+                if (offline != null) add(offline)
+                addAll(userPlaylists)
+            }
+        }
+    }
 
     val listState = rememberLazyListState()
 
@@ -130,116 +158,235 @@ fun HomeScreen(
                 .fillMaxSize()
                 .padding(paddingValues)
         ) {
-            when {
-                isLoading && trendingSongs.isEmpty() -> {
-                    CircularProgressIndicator(modifier = Modifier.align(Alignment.Center))
-                }
-                trendingSongs.isNotEmpty() -> {
-                    LazyColumn(
-                        state = listState,
-                        modifier = Modifier.fillMaxSize(),
-                        contentPadding = PaddingValues(bottom = 80.dp)
-                    ) {
-                        // Quick picks section
-                        if (quickPicks.isNotEmpty()) {
-                            item {
+            if (isLoading && trendingSongs.isEmpty()) {
+                CircularProgressIndicator(modifier = Modifier.align(Alignment.Center))
+            } else {
+                LazyColumn(
+                    state = listState,
+                    modifier = Modifier.fillMaxSize(),
+                    contentPadding = PaddingValues(bottom = 80.dp)
+                ) {
+                    item {
+                        if (homePlaylists.isNotEmpty()) {
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(top = 12.dp)
+                            ) {
+                                Text(
+                                    text = "Playlist",
+                                    style = MaterialTheme.typography.titleLarge,
+                                    fontWeight = FontWeight.Bold,
+                                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
+                                )
                                 Row(
                                     modifier = Modifier
                                         .fillMaxWidth()
-                                        .padding(start = 16.dp, end = 8.dp, top = 16.dp, bottom = 8.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.SpaceBetween
-                                ) {
-                                    Text(
-                                        text = "Quick picks",
-                                        style = MaterialTheme.typography.titleLarge,
-                                        fontWeight = FontWeight.Bold
-                                    )
-                                    TextButton(onClick = onNavigateToQuickPicks) {
-                                        Text("More →", style = MaterialTheme.typography.labelLarge)
-                                    }
-                                }
-                            }
-                            item {
-                                val rows = quickPicks.chunked(2)
-                                Column(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
+                                        .horizontalScroll(rememberScrollState())
                                         .padding(horizontal = 12.dp),
-                                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                                    horizontalArrangement = Arrangement.spacedBy(12.dp)
                                 ) {
-                                    rows.forEach { rowItems ->
-                                        Row(
-                                            modifier = Modifier.fillMaxWidth(),
-                                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                                        ) {
-                                            rowItems.forEach { pick ->
-                                                QuickPickCard(
-                                                    modifier = Modifier.weight(1f),
-                                                    title = pick.title,
-                                                    artist = pick.artist,
-                                                    thumbnailUrl = pick.thumbnailUrl,
-                                                    onClick = {
-                                                        viewModel.playSearchResult(pick)
-                                                        onNavigateToPlayer()
-                                                    }
-                                                )
-                                            }
-                                            if (rowItems.size == 1) Spacer(Modifier.weight(1f))
-                                        }
+                                    homePlaylists.forEach { playlist ->
+                                        HomePlaylistCard(
+                                            playlist = playlist,
+                                            isOfflinePlaylist = playlist.id == offlinePlaylistId,
+                                            offlineSongCount = offlineSongCount,
+                                            onClick = { onNavigateToPlaylist(playlist.id) }
+                                        )
                                     }
                                 }
                             }
                         }
+                    }
 
-                        // Trending section header
+                    if (quickPicks.isNotEmpty()) {
                         item {
-                            Text(
-                                text = "Trending now",
-                                style = MaterialTheme.typography.titleLarge,
-                                fontWeight = FontWeight.Bold,
-                                modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 8.dp)
-                            )
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(start = 16.dp, end = 8.dp, top = 16.dp, bottom = 8.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Text(
+                                    text = "Quick picks",
+                                    style = MaterialTheme.typography.titleLarge,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                TextButton(onClick = onNavigateToQuickPicks) {
+                                    Text("More →", style = MaterialTheme.typography.labelLarge)
+                                }
+                            }
                         }
+                        item {
+                            val rows = quickPicks.chunked(2)
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 12.dp),
+                                verticalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                rows.forEach { rowItems ->
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                    ) {
+                                        rowItems.forEach { pick ->
+                                            QuickPickCard(
+                                                modifier = Modifier.weight(1f),
+                                                title = pick.title,
+                                                artist = pick.artist,
+                                                thumbnailUrl = pick.thumbnailUrl,
+                                                onClick = {
+                                                    viewModel.playSearchResult(pick)
+                                                    onNavigateToPlayer()
+                                                }
+                                            )
+                                        }
+                                        if (rowItems.size == 1) Spacer(Modifier.weight(1f))
+                                    }
+                                }
+                            }
+                        }
+                    }
 
+                    item {
+                        Text(
+                            text = "Trending now",
+                            style = MaterialTheme.typography.titleLarge,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 8.dp)
+                        )
+                    }
+
+                    if (trendingSongs.isEmpty()) {
+                        item {
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 16.dp, vertical = 8.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally
+                            ) {
+                                Text(
+                                    text = "Couldn't load songs",
+                                    style = MaterialTheme.typography.bodyLarge
+                                )
+                                Spacer(modifier = Modifier.height(8.dp))
+                                Button(onClick = { viewModel.reloadTrending() }) { Text("Retry") }
+                            }
+                        }
+                    } else {
                         items(trendingSongs) { result ->
                             SearchResultItem(
                                 searchResult = result,
-                                downloadStatus = com.musictube.player.viewmodel.DownloadStatus.IDLE,
-                                onDownload = {},
+                                downloadStatus = downloadStatus[result.id] ?: DownloadStatus.IDLE,
+                                downloadProgress = downloadProgress[result.id] ?: 0,
+                                onDownload = { viewModel.downloadSong(result) },
                                 onPlay = {
                                     viewModel.playSearchResult(result)
                                     onNavigateToPlayer()
                                 }
                             )
                         }
+                    }
 
-                        // Load-more indicator
-                        item {
-                            if (isLoadingMore) {
-                                Box(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(16.dp),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    CircularProgressIndicator(modifier = Modifier.size(28.dp))
-                                }
+                    item {
+                        if (isLoadingMore) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(16.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                CircularProgressIndicator(modifier = Modifier.size(28.dp))
                             }
                         }
                     }
                 }
-                else -> {
-                    Column(
-                        modifier = Modifier.align(Alignment.Center),
-                        horizontalAlignment = Alignment.CenterHorizontally
-                    ) {
-                        Text(text = "Couldn't load songs", style = MaterialTheme.typography.bodyLarge)
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Button(onClick = { viewModel.reloadTrending() }) { Text("Retry") }
+            }
+        }
+    }
+}
+
+@Composable
+private fun HomePlaylistCard(
+    playlist: Playlist,
+    isOfflinePlaylist: Boolean,
+    offlineSongCount: Int,
+    onClick: () -> Unit
+) {
+    Card(
+        modifier = Modifier
+            .width(112.dp)
+            .clickable { onClick() },
+        shape = RoundedCornerShape(12.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceVariant
+        )
+    ) {
+        Column(modifier = Modifier.padding(8.dp)) {
+            if (!playlist.thumbnailUrl.isNullOrBlank()) {
+                AsyncImage(
+                    model = playlist.thumbnailUrl,
+                    contentDescription = null,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .aspectRatio(1f)
+                        .clip(RoundedCornerShape(10.dp))
+                )
+            } else {
+                Surface(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .aspectRatio(1f),
+                    shape = RoundedCornerShape(10.dp),
+                    color = if (isOfflinePlaylist) {
+                        MaterialTheme.colorScheme.primaryContainer
+                    } else {
+                        MaterialTheme.colorScheme.secondaryContainer
+                    }
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(
+                            imageVector = if (isOfflinePlaylist) {
+                                Icons.Default.Download
+                            } else {
+                                Icons.Default.LibraryMusic
+                            },
+                            contentDescription = null,
+                            modifier = Modifier.size(36.dp),
+                            tint = if (isOfflinePlaylist) {
+                                MaterialTheme.colorScheme.onPrimaryContainer
+                            } else {
+                                MaterialTheme.colorScheme.onSecondaryContainer
+                            }
+                        )
                     }
                 }
             }
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            Text(
+                text = playlist.name,
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis
+            )
+
+            Text(
+                text = if (isOfflinePlaylist) {
+                    "$offlineSongCount downloaded songs"
+                } else {
+                    "${playlist.songCount} songs"
+                },
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
         }
     }
 }
