@@ -55,6 +55,15 @@ class HomeViewModel @Inject constructor(
     val downloadStatus: StateFlow<Map<String, DownloadStatus>> = downloadManager.downloadStatus
     val downloadProgress: StateFlow<Map<String, Int>> = downloadManager.downloadProgress
 
+    // DB-backed set of YouTube video IDs that are already downloaded (survives app restarts)
+    val downloadedVideoIds: StateFlow<Set<String>> = musicRepository.getDownloadedSongs()
+        .map { songs ->
+            songs.mapNotNull { song ->
+                if (song.id.startsWith("yt_")) song.id.removePrefix("yt_") else null
+            }.toSet()
+        }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptySet())
+
     val playlists: StateFlow<List<Playlist>> = musicRepository.getAllPlaylists()
         .stateIn(
             scope = viewModelScope,

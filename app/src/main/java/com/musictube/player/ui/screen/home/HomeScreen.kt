@@ -49,6 +49,7 @@ fun HomeScreen(
     val isLoadingMore by viewModel.isLoadingMore.collectAsState()
     val downloadStatus by viewModel.downloadStatus.collectAsState()
     val downloadProgress by viewModel.downloadProgress.collectAsState()
+    val downloadedVideoIds by viewModel.downloadedVideoIds.collectAsState()
     val nowPlayingSong by viewModel.currentSong.collectAsState()
     val isPlayingNow by viewModel.isPlayingNow.collectAsState()
 
@@ -279,7 +280,8 @@ fun HomeScreen(
                         items(trendingSongs) { result ->
                             SearchResultItem(
                                 searchResult = result,
-                                downloadStatus = downloadStatus[result.id] ?: DownloadStatus.IDLE,
+                                downloadStatus = if (result.id in downloadedVideoIds) DownloadStatus.COMPLETED
+                                                 else (downloadStatus[result.id] ?: DownloadStatus.IDLE),
                                 downloadProgress = downloadProgress[result.id] ?: 0,
                                 onDownload = { viewModel.downloadSong(result) },
                                 onPlay = {

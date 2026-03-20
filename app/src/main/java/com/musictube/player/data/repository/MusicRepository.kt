@@ -24,7 +24,9 @@ class MusicRepository @Inject constructor(
 ) {
     
     fun getAllSongs(): Flow<List<Song>> = songDao.getAllSongs()
-    
+
+    fun getDownloadedSongs(): Flow<List<Song>> = songDao.getDownloadedSongs()
+
     fun getLikedSongs(): Flow<List<Song>> = songDao.getLikedSongs()
     
     fun searchSongs(query: String): Flow<List<Song>> = songDao.searchSongs(query)
@@ -117,7 +119,10 @@ class MusicRepository @Inject constructor(
     
     fun getPlaylistSongs(playlistId: String): Flow<List<Song>> = 
         playlistDao.getPlaylistSongs(playlistId)
-    
+
+    fun isSongInAnyPlaylist(songId: String): Flow<Boolean> =
+        playlistDao.isSongInAnyPlaylist(songId).map { it > 0 }
+
     suspend fun createPlaylist(name: String, description: String? = null): String {
         val normalizedName = name.trim()
         val existing = playlistDao.getPlaylistByName(normalizedName)

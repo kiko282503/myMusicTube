@@ -18,6 +18,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import javax.inject.Inject
@@ -51,6 +52,15 @@ class SearchViewModel @Inject constructor(
     // Expose download status/progress from DownloadManager
     val downloadStatus: StateFlow<Map<String, DownloadStatus>> = downloadManager.downloadStatus
     val downloadProgress: StateFlow<Map<String, Int>> = downloadManager.downloadProgress
+
+    // DB-backed set of YouTube video IDs that are already downloaded (survives app restarts)
+    val downloadedVideoIds: StateFlow<Set<String>> = musicRepository.getDownloadedSongs()
+        .map { songs ->
+            songs.mapNotNull { song ->
+                if (song.id.startsWith("yt_")) song.id.removePrefix("yt_") else null
+            }.toSet()
+        }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptySet())
 
     val playlists: StateFlow<List<Playlist>> = musicRepository.getAllPlaylists()
         .stateIn(

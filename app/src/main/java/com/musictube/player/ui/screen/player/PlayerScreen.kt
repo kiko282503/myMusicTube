@@ -49,6 +49,7 @@ fun PlayerScreen(
     val downloadStatus by viewModel.currentDownloadStatus.collectAsState()
     val downloadProgress by viewModel.currentDownloadProgress.collectAsState()
     val playlists by viewModel.getPlaylistList().collectAsState(initial = emptyList())
+    val isInAnyPlaylist by viewModel.isCurrentSongInAnyPlaylist.collectAsState()
     val context = LocalContext.current
     
     var showPlaylistDialog by remember { mutableStateOf(false) }
@@ -233,51 +234,52 @@ fun PlayerScreen(
                         .padding(horizontal = 16.dp),
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    // Download button
-                    Button(
-                        onClick = { viewModel.downloadCurrentSong() },
-                        modifier = Modifier
-                            .weight(1f)
-                            .height(48.dp),
-                        enabled = downloadStatus != DownloadStatus.DOWNLOADING
-                    ) {
-                        when (downloadStatus) {
-                            DownloadStatus.IDLE -> {
-                                Row(
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Icon(Icons.Default.Download, contentDescription = "Download")
-                                    Text("Download")
+                    // Download button — hidden once the song is fully downloaded
+                    if (downloadStatus != DownloadStatus.COMPLETED) {
+                        Button(
+                            onClick = { viewModel.downloadCurrentSong() },
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(48.dp),
+                            enabled = downloadStatus == DownloadStatus.IDLE || downloadStatus == DownloadStatus.FAILED
+                        ) {
+                            when (downloadStatus) {
+                                DownloadStatus.IDLE -> {
+                                    Row(
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Icon(Icons.Default.Download, contentDescription = "Download")
+                                        Text("Download")
+                                    }
                                 }
-                            }
-                            DownloadStatus.DOWNLOADING -> {
-                                Row(
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    CircularProgressIndicator(
-                                        modifier = Modifier.size(20.dp),
-                                        strokeWidth = 2.dp
-                                    )
-                                    Text("$downloadProgress%")
+                                DownloadStatus.DOWNLOADING -> {
+                                    Row(
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        CircularProgressIndicator(
+                                            modifier = Modifier.size(20.dp),
+                                            strokeWidth = 2.dp
+                                        )
+                                        Text("$downloadProgress%")
+                                    }
                                 }
-                            }
-                            DownloadStatus.COMPLETED -> {
-                                Text("Downloaded ✓")
-                            }
-                            DownloadStatus.FAILED -> {
-                                Text("Download Failed")
+                                DownloadStatus.FAILED -> {
+                                    Text("Download Failed")
+                                }
+                                else -> {}
                             }
                         }
                     }
-                    
+
                     // Add to Playlist button
                     Button(
                         onClick = { showPlaylistDialog = true },
                         modifier = Modifier
                             .weight(1f)
-                            .height(48.dp)
+                            .height(48.dp),
+                        enabled = !isInAnyPlaylist
                     ) {
                         Row(
                             horizontalArrangement = Arrangement.spacedBy(8.dp),

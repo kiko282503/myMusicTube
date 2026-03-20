@@ -38,6 +38,9 @@ interface SongDao {
     
     @Query("UPDATE songs SET isLiked = :isLiked WHERE id = :songId")
     suspend fun updateLikedStatus(songId: String, isLiked: Boolean)
+
+    @Query("SELECT * FROM songs WHERE isDownloaded = 1")
+    fun getDownloadedSongs(): Flow<List<Song>>
 }
 
 @Dao
@@ -90,6 +93,13 @@ interface PlaylistDao {
 
     @Query("SELECT COUNT(*) FROM playlist_songs WHERE playlistId = :playlistId AND songId = :songId")
     suspend fun isSongInPlaylist(playlistId: String, songId: String): Int
+
+    @Query("""
+        SELECT COUNT(*) FROM playlist_songs ps
+        INNER JOIN playlists p ON ps.playlistId = p.id
+        WHERE ps.songId = :songId AND p.name != 'Offline Downloads'
+    """)
+    fun isSongInAnyPlaylist(songId: String): Flow<Int>
 
     @Query("UPDATE playlists SET songCount = :songCount WHERE id = :playlistId")
     suspend fun updatePlaylistSongCount(playlistId: String, songCount: Int)
