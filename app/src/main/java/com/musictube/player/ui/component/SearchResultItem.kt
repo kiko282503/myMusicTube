@@ -16,7 +16,10 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import coil.compose.AsyncImage
+import coil.request.ImageRequest
 import com.musictube.player.data.model.SearchResult
 import com.musictube.player.service.DownloadStatus
 
@@ -53,8 +56,12 @@ fun SearchResultItem(
             ) {
                 if (searchResult.thumbnailUrl.isNotEmpty()) {
                     AsyncImage(
-                        model = searchResult.thumbnailUrl,
+                        model = ImageRequest.Builder(LocalContext.current)
+                            .data(searchResult.thumbnailUrl)
+                            .crossfade(200)
+                            .build(),
                         contentDescription = "Thumbnail",
+                        contentScale = ContentScale.Crop,
                         modifier = Modifier.fillMaxSize()
                     )
                 } else {

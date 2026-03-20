@@ -26,7 +26,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.compose.ui.platform.LocalContext
 import coil.compose.AsyncImage
+import coil.request.ImageRequest
 import com.musictube.player.data.model.Playlist
 import com.musictube.player.ui.component.SearchResultItem
 import com.musictube.player.service.DownloadStatus
@@ -317,7 +319,7 @@ fun HomeScreen(
                             }
                         }
                     } else {
-                        items(trendingSongs) { result ->
+                        items(trendingSongs, key = { it.id }) { result ->
                             SearchResultItem(
                                 searchResult = result,
                                 downloadStatus = if (result.id in downloadedVideoIds) DownloadStatus.COMPLETED
@@ -369,7 +371,10 @@ private fun HomePlaylistCard(
         Column(modifier = Modifier.padding(8.dp)) {
             if (!playlist.thumbnailUrl.isNullOrBlank()) {
                 AsyncImage(
-                    model = playlist.thumbnailUrl,
+                    model = ImageRequest.Builder(LocalContext.current)
+                        .data(playlist.thumbnailUrl)
+                        .crossfade(200)
+                        .build(),
                     contentDescription = null,
                     contentScale = ContentScale.Crop,
                     modifier = Modifier
@@ -454,10 +459,12 @@ private fun QuickPickCard(
             modifier = Modifier.fillMaxSize(),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // Square thumbnail on the left
             if (thumbnailUrl.isNotEmpty()) {
                 AsyncImage(
-                    model = thumbnailUrl,
+                    model = ImageRequest.Builder(LocalContext.current)
+                        .data(thumbnailUrl)
+                        .crossfade(200)
+                        .build(),
                     contentDescription = null,
                     contentScale = ContentScale.Crop,
                     modifier = Modifier

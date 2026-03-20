@@ -148,7 +148,7 @@ fun SearchScreen(
                             ),
                             verticalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
-                            items(searchResults) { result ->
+                            items(searchResults, key = { it.id }) { result ->
                                 SearchResultItem(
                                     searchResult = result,
                                     downloadStatus = if (result.id in downloadedVideoIds) DownloadStatus.COMPLETED

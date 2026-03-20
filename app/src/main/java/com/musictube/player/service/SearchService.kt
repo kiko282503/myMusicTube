@@ -26,16 +26,17 @@ class SearchService @Inject constructor() {
     private val searchUrl = "https://music.youtube.com/youtubei/v1/search?prettyPrint=false"
 
     // songsOnly=true adds the YouTube Music "Songs" filter so only individual tracks are returned
-    suspend fun searchMusic(query: String, songsOnly: Boolean = false): List<SearchResult> = withContext(Dispatchers.IO) {
+    // maxPages controls how many continuation pages are fetched (1 = first page only, for fast initial load)
+    suspend fun searchMusic(query: String, songsOnly: Boolean = false, maxPages: Int = 1): List<SearchResult> = withContext(Dispatchers.IO) {
         try {
-            searchYouTube(query, songsOnly)
+            searchYouTube(query, songsOnly, maxPages)
         } catch (e: Exception) {
             Log.e("SearchService", "YouTube search failed: ${e.message}", e)
             emptyList()
         }
     }
 
-    private fun searchYouTube(query: String, songsOnly: Boolean): List<SearchResult> {
+    private fun searchYouTube(query: String, songsOnly: Boolean, maxPages: Int = 1): List<SearchResult> {
         Log.d("SearchService", "Searching YouTube Music for: $query (songsOnly=$songsOnly)")
 
         val safeQuery = query.replace("\\", "\\\\").replace("\"", "\\\"")
@@ -58,8 +59,7 @@ class SearchService @Inject constructor() {
         }
 
         var page = 1
-        val maxPages = 6
-        val maxResults = 200
+        val maxResults = maxPages * 25 // ~25 results per page
         while (continuationToken != null && page < maxPages && collected.size < maxResults) {
             val safeToken = continuationToken.replace("\\", "\\\\").replace("\"", "\\\"")
             val continuationBody = """{"context":$baseContextJson,"continuation":"$safeToken"}"""
@@ -84,7 +84,7 @@ class SearchService @Inject constructor() {
 
         val uniqueResults = collected
             .distinctBy { it.id }
-            .take(maxResults)
+            .take(maxPages * 25)
         Log.d("SearchService", "Extracted ${uniqueResults.size} unique results across $page pages")
         return uniqueResults
     }

@@ -14,6 +14,8 @@ import com.musictube.player.service.OkHttpDownloader
 import com.musictube.player.service.SearchService
 import com.musictube.player.service.YouTubeStreamService
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -75,11 +77,17 @@ class SearchViewModel @Inject constructor(
     private val _errorMessage = MutableStateFlow<String?>(null)
     val errorMessage: StateFlow<String?> = _errorMessage.asStateFlow()
 
+    private var debounceJob: Job? = null
+
     fun updateSearchQuery(query: String) {
         _searchQuery.value = query
+        debounceJob?.cancel()
         if (query.isNotEmpty()) {
-            _canLoadMore.value = true
-            searchMusic()
+            debounceJob = viewModelScope.launch {
+                delay(400) // Wait 400ms after the user stops typing
+                _canLoadMore.value = true
+                searchMusic()
+            }
         } else {
             _searchResults.value = emptyList()
         }

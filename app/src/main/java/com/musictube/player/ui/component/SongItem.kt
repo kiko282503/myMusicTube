@@ -18,7 +18,10 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import coil.compose.AsyncImage
+import coil.request.ImageRequest
 import com.musictube.player.data.model.Song
 import java.util.concurrent.TimeUnit
 
@@ -54,8 +57,12 @@ fun SongItem(
             ) {
                 if (song.thumbnailUrl != null) {
                     AsyncImage(
-                        model = song.thumbnailUrl,
+                        model = ImageRequest.Builder(LocalContext.current)
+                            .data(song.thumbnailUrl)
+                            .crossfade(200)
+                            .build(),
                         contentDescription = "Album art",
+                        contentScale = ContentScale.Crop,
                         modifier = Modifier.fillMaxSize()
                     )
                 } else {

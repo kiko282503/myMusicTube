@@ -19,7 +19,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.compose.ui.platform.LocalContext
 import coil.compose.AsyncImage
+import coil.request.ImageRequest
 import com.musictube.player.viewmodel.QuickPicksViewModel
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -143,7 +145,10 @@ private fun PickCard(
         ) {
             if (thumbnailUrl.isNotEmpty()) {
                 AsyncImage(
-                    model = thumbnailUrl,
+                    model = ImageRequest.Builder(LocalContext.current)
+                        .data(thumbnailUrl)
+                        .crossfade(200)
+                        .build(),
                     contentDescription = null,
                     contentScale = ContentScale.Crop,
                     modifier = Modifier

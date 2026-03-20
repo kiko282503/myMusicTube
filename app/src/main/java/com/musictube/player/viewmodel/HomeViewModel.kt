@@ -132,11 +132,11 @@ class HomeViewModel @Inject constructor(
         viewModelScope.launch {
             _isLoading.value = true
             try {
-                val songOnlyResults = searchService.searchMusic(getRandomTrendingQuery(), songsOnly = true)
+                val songOnlyResults = searchService.searchMusic(getRandomTrendingQuery(), songsOnly = true, maxPages = 2)
                 val results = if (songOnlyResults.isNotEmpty()) {
                     songOnlyResults
                 } else {
-                    searchService.searchMusic(getRandomTrendingQuery(), songsOnly = false)
+                    searchService.searchMusic(getRandomTrendingQuery(), songsOnly = false, maxPages = 2)
                 }
                 _trendingSongs.value = results.distinctBy { it.id }
                 trendingPage = 1
@@ -159,11 +159,11 @@ class HomeViewModel @Inject constructor(
 
                 repeat(3) {
                     val query = getRandomTrendingQuery()
-                    val songOnlyResults = searchService.searchMusic(query, songsOnly = true)
+                    val songOnlyResults = searchService.searchMusic(query, songsOnly = true, maxPages = 2)
                     val results = if (songOnlyResults.isNotEmpty()) {
                         songOnlyResults
                     } else {
-                        searchService.searchMusic(query, songsOnly = false)
+                        searchService.searchMusic(query, songsOnly = false, maxPages = 2)
                     }
                     val fresh = results.filter { it.id !in existingIds }
                     if (fresh.isNotEmpty()) {
