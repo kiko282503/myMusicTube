@@ -60,6 +60,9 @@ captures/
 # Google Services (e.g. APIs or Firebase)
 # google-services.json
 
+# Temporary/extracted APK artifacts
+tmp_mixtube/
+
 # Version control
 vcs.xml
 
