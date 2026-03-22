@@ -1,5 +1,9 @@
 ﻿package com.musictube.player.ui.screen.player
 
+import coil.compose.AsyncImage
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.draw.clip
 import android.content.Context
 import android.media.AudioManager
 import androidx.compose.foundation.layout.*
@@ -48,6 +52,7 @@ fun PlayerScreen(
     val currentSong by viewModel.currentSong.collectAsState()
     val currentVideoId by viewModel.currentVideoId.collectAsState()
     val isPlaying by viewModel.isPlaying.collectAsState()
+    val isLoadingStream by viewModel.isLoadingStream.collectAsState()
     val currentPosition by viewModel.currentPosition.collectAsState()
     val duration by viewModel.duration.collectAsState()
     val downloadStatus by viewModel.currentDownloadStatus.collectAsState()
@@ -136,12 +141,14 @@ fun PlayerScreen(
                     // Show playback status and progress
                     Text(
                         text = when {
+                            isLoadingStream -> "Loading..."
                             isPlaying -> "Playing"
                             currentPosition == 0L -> "Stopped"
                             else -> "Paused"
                         },
                         style = MaterialTheme.typography.bodySmall,
                         color = when {
+                            isLoadingStream -> MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
                             isPlaying -> MaterialTheme.colorScheme.primary
                             currentPosition == 0L -> MaterialTheme.colorScheme.error
                             else -> MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
@@ -150,7 +157,15 @@ fun PlayerScreen(
                     
                     // Show progress info - always visible if song exists
                     Spacer(modifier = Modifier.height(4.dp))
-                    if (duration > 0) {
+                    if (isLoadingStream) {
+                        Text(
+                            text = "Fetching stream...",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                    } else if (duration > 0) {
                         Text(
                             text = "${formatTime(currentPosition)} / ${formatTime(duration)}",
                             style = MaterialTheme.typography.bodySmall,
@@ -373,57 +388,25 @@ fun PlayerScreen(
                         .fillMaxWidth()
                         .weight(1f)
                         .padding(16.dp),
-                    elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
+                    elevation = CardDefaults.cardElevation(defaultElevation = 4.dp),
+                    shape = RoundedCornerShape(16.dp)
                 ) {
                     Box(
                         modifier = Modifier.fillMaxSize(),
                         contentAlignment = Alignment.Center
                     ) {
-                        if (currentVideoId != null) {
-                            // WebView lives in android.R.id.content (GONE) — no Compose hosting needed.
-                            Column(
-                                modifier = Modifier.fillMaxSize(),
-                                horizontalAlignment = Alignment.CenterHorizontally,
-                                verticalArrangement = Arrangement.Center
-                            ) {
-                                Text(text = "🎵", style = MaterialTheme.typography.displayLarge)
-                                Spacer(modifier = Modifier.height(16.dp))
-                                Text(
-                                    text = "YouTube Music",
-                                    style = MaterialTheme.typography.bodyLarge,
-                                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
-                                )
-                                Spacer(modifier = Modifier.height(8.dp))
-                                Text(
-                                    text = when {
-                                        isPlaying -> "Streaming"
-                                        currentPosition > 0 -> "Paused"
-                                        duration > 0 -> "Ready"
-                                        else -> "Loading..."
-                                    },
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = if (isPlaying) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
-                                )
-                            }
+                        val thumbUrl = currentSong?.thumbnailUrl
+                        if (!thumbUrl.isNullOrBlank()) {
+                            AsyncImage(
+                                model = thumbUrl,
+                                contentDescription = currentSong?.title,
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .clip(RoundedCornerShape(16.dp)),
+                                contentScale = ContentScale.Crop
+                            )
                         } else {
-                            Column(
-                                horizontalAlignment = Alignment.CenterHorizontally,
-                                verticalArrangement = Arrangement.Center
-                            ) {
-                                Text(text = "🎵", style = MaterialTheme.typography.displayLarge)
-                                Spacer(modifier = Modifier.height(16.dp))
-                                Text(
-                                    text = "ExoPlayer Audio",
-                                    style = MaterialTheme.typography.bodyLarge,
-                                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
-                                )
-                                Spacer(modifier = Modifier.height(8.dp))
-                                Text(
-                                    text = "Background playback supported",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.primary
-                                )
-                            }
+                            Text(text = "🎵", style = MaterialTheme.typography.displayLarge)
                         }
                     }
                 }

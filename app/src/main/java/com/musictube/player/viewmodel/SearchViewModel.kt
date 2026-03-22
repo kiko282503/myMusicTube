@@ -51,6 +51,9 @@ class SearchViewModel @Inject constructor(
     private val _canLoadMore = MutableStateFlow(true)
     val canLoadMore: StateFlow<Boolean> = _canLoadMore.asStateFlow()
 
+    // Continuation token from the last search page — used to fetch the real next page
+    private var continuationToken: String? = null
+
     // Expose download status/progress from DownloadManager
     val downloadStatus: StateFlow<Map<String, DownloadStatus>> = downloadManager.downloadStatus
     val downloadProgress: StateFlow<Map<String, Int>> = downloadManager.downloadProgress
@@ -97,6 +100,7 @@ class SearchViewModel @Inject constructor(
         _searchQuery.value = ""
         _searchResults.value = emptyList()
         _canLoadMore.value = true
+        continuationToken = null
     }
 
     fun searchMusic() {
@@ -105,13 +109,17 @@ class SearchViewModel @Inject constructor(
 
             _isLoading.value = true
             _errorMessage.value = null
-            _canLoadMore.value = true  // Reset load-more for each fresh search
+            _canLoadMore.value = true
+            continuationToken = null
 
             try {
-                val results = searchService.searchMusic(_searchQuery.value)
-                _searchResults.value = results
+                val (results, token) = searchService.searchMusicPaged(_searchQuery.value, songsOnly = true)
+                continuationToken = token
+                val filtered = results.filter { it.itemType !in setOf("episode", "podcast") }
+                _searchResults.value = filtered
+                _canLoadMore.value = token != null
 
-                if (results.isEmpty()) {
+                if (filtered.isEmpty()) {
                     _canLoadMore.value = false
                     _errorMessage.value = "No results found for '${_searchQuery.value}'"
                 }
@@ -169,29 +177,55 @@ class SearchViewModel @Inject constructor(
     fun loadMoreResults() {
         // Don't attempt if already loading or confirmed no more results exist
         if (_isLoadingMore.value || _searchQuery.value.isBlank() || !_canLoadMore.value) return
+        val token = continuationToken ?: run {
+            _canLoadMore.value = false
+            return
+        }
 
         _isLoadingMore.value = true
 
         viewModelScope.launch {
             try {
-                // Fetch a fresh batch using a slight variation to try getting different items
-                val baseQuery = _searchQuery.value
-                val additionalResults = searchService.searchMusic(baseQuery)
-                
-                // Merge with existing results, avoiding duplicates
-                val existingIds = _searchResults.value.map { it.id }.toSet()
-                val newResults = additionalResults.filter { it.id !in existingIds }
-                
-                if (newResults.isNotEmpty()) {
-                    _searchResults.value = _searchResults.value + newResults
-                    Log.d("SearchViewModel", "Loaded ${newResults.size} more, total: ${_searchResults.value.size}")
-                } else {
-                    // No new results — stop triggering further loads
-                    _canLoadMore.value = false
-                    Log.d("SearchViewModel", "No new results, disabling load-more")
+                val existingIds = _searchResults.value.map { it.id }.toMutableSet()
+                var currentToken: String = token
+                var skips = 0
+                val maxSkips = 10
+                var foundFresh = false
+
+                while (skips <= maxSkips) {
+                    val (newResults, nextToken) = searchService.fetchContinuation(currentToken, songsOnly = true)
+
+                    val fresh = newResults.filter {
+                        it.id !in existingIds && it.itemType !in setOf("episode", "podcast")
+                    }
+
+                    if (fresh.isNotEmpty()) {
+                        existingIds.addAll(fresh.map { it.id })
+                        _searchResults.value = _searchResults.value + fresh
+                        // Save the next token for the subsequent load-more call
+                        continuationToken = nextToken
+                        _canLoadMore.value = nextToken != null
+                        foundFresh = true
+                        break
+                    } else if (nextToken != null) {
+                        // Page had no new items — advance to next continuation and retry
+                        currentToken = nextToken
+                        skips++
+                    } else {
+                        // Truly no more pages
+                        continuationToken = null
+                        _canLoadMore.value = false
+                        break
+                    }
+                }
+
+                if (!foundFresh && skips > maxSkips) {
+                    // Hit skip limit but don't kill pagination permanently —
+                    // save where we are so the next scroll can try again
+                    continuationToken = currentToken
+                    _canLoadMore.value = true
                 }
             } catch (e: Exception) {
-                _canLoadMore.value = false
                 Log.e("SearchViewModel", "Failed to load more results: ${e.message}", e)
             } finally {
                 _isLoadingMore.value = false

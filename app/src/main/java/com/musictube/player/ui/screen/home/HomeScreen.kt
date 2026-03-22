@@ -27,7 +27,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.compose.ui.platform.LocalContext
-import coil.compose.AsyncImage
+import coil.compose.SubcomposeAsyncImage
 import coil.request.ImageRequest
 import com.musictube.player.data.model.Playlist
 import com.musictube.player.ui.component.SearchResultItem
@@ -102,14 +102,7 @@ fun HomeScreen(
                 }
             )
         },
-        floatingActionButton = {
-            FloatingActionButton(
-                onClick = onNavigateToSearch,
-                containerColor = MaterialTheme.colorScheme.primary
-            ) {
-                Icon(Icons.Default.Search, contentDescription = "Search Music")
-            }
-        },
+
         bottomBar = {
             // Show Now Playing bar when a song is active so the user can return to the player
             val song = nowPlayingSong
@@ -201,34 +194,78 @@ fun HomeScreen(
                 .fillMaxSize()
                 .padding(paddingValues)
         ) {
-            if (isLoading && trendingSongs.isEmpty()) {
-                CircularProgressIndicator(modifier = Modifier.align(Alignment.Center))
-            } else {
-                LazyColumn(
-                    state = listState,
-                    modifier = Modifier.fillMaxSize(),
-                    contentPadding = PaddingValues(bottom = 80.dp)
-                ) {
+            LazyColumn(
+                state = listState,
+                modifier = Modifier.fillMaxSize(),
+                contentPadding = PaddingValues(bottom = 80.dp)
+            ) {
                     item {
-                        if (homePlaylists.isNotEmpty()) {
-                            Column(
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(top = 12.dp)
+                        ) {
+                            Text(
+                                text = "Playlist",
+                                style = MaterialTheme.typography.titleLarge,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
+                            )
+                            Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .padding(top = 12.dp)
+                                    .horizontalScroll(rememberScrollState())
+                                    .padding(horizontal = 12.dp),
+                                horizontalArrangement = Arrangement.spacedBy(12.dp)
                             ) {
-                                Text(
-                                    text = "Playlist",
-                                    style = MaterialTheme.typography.titleLarge,
-                                    fontWeight = FontWeight.Bold,
-                                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
-                                )
-                                Row(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .horizontalScroll(rememberScrollState())
-                                        .padding(horizontal = 12.dp),
-                                    horizontalArrangement = Arrangement.spacedBy(12.dp)
-                                ) {
+                                if (homePlaylists.isEmpty()) {
+                                    // Skeleton: 2 placeholder playlist cards while DB loads
+                                    repeat(2) {
+                                        Card(
+                                            modifier = Modifier.width(112.dp),
+                                            shape = RoundedCornerShape(12.dp),
+                                            colors = CardDefaults.cardColors(
+                                                containerColor = MaterialTheme.colorScheme.surfaceVariant
+                                            )
+                                        ) {
+                                            Column(modifier = Modifier.padding(8.dp)) {
+                                                Box(
+                                                    modifier = Modifier
+                                                        .fillMaxWidth()
+                                                        .aspectRatio(1f)
+                                                        .clip(RoundedCornerShape(10.dp)),
+                                                    contentAlignment = Alignment.Center
+                                                ) {
+                                                    Surface(
+                                                        modifier = Modifier.fillMaxSize(),
+                                                        shape = RoundedCornerShape(10.dp),
+                                                        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.5f)
+                                                    ) {}
+                                                    CircularProgressIndicator(
+                                                        modifier = Modifier.size(24.dp),
+                                                        strokeWidth = 2.dp
+                                                    )
+                                                }
+                                                Spacer(modifier = Modifier.height(8.dp))
+                                                Surface(
+                                                    modifier = Modifier
+                                                        .fillMaxWidth(0.8f)
+                                                        .height(12.dp),
+                                                    shape = RoundedCornerShape(4.dp),
+                                                    color = MaterialTheme.colorScheme.surface.copy(alpha = 0.5f)
+                                                ) {}
+                                                Spacer(modifier = Modifier.height(4.dp))
+                                                Surface(
+                                                    modifier = Modifier
+                                                        .fillMaxWidth(0.6f)
+                                                        .height(10.dp),
+                                                    shape = RoundedCornerShape(4.dp),
+                                                    color = MaterialTheme.colorScheme.surface.copy(alpha = 0.5f)
+                                                ) {}
+                                            }
+                                        }
+                                    }
+                                } else {
                                     homePlaylists.forEach { playlist ->
                                         HomePlaylistCard(
                                             playlist = playlist,
@@ -242,7 +279,8 @@ fun HomeScreen(
                         }
                     }
 
-                    if (quickPicks.isNotEmpty()) {
+                    // Quick picks section — show skeleton while loading, real cards once ready
+                    if (isLoading || quickPicks.isNotEmpty()) {
                         item {
                             Row(
                                 modifier = Modifier
@@ -256,37 +294,103 @@ fun HomeScreen(
                                     style = MaterialTheme.typography.titleLarge,
                                     fontWeight = FontWeight.Bold
                                 )
-                                TextButton(onClick = onNavigateToQuickPicks) {
-                                    Text("More →", style = MaterialTheme.typography.labelLarge)
+                                if (quickPicks.isNotEmpty()) {
+                                    TextButton(onClick = onNavigateToQuickPicks) {
+                                        Text("More →", style = MaterialTheme.typography.labelLarge)
+                                    }
                                 }
                             }
                         }
                         item {
-                            val rows = quickPicks.chunked(2)
                             Column(
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .padding(horizontal = 12.dp),
                                 verticalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
-                                rows.forEach { rowItems ->
-                                    Row(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                                    ) {
-                                        rowItems.forEach { pick ->
-                                            QuickPickCard(
-                                                modifier = Modifier.weight(1f),
-                                                title = pick.title,
-                                                artist = pick.artist,
-                                                thumbnailUrl = pick.thumbnailUrl,
-                                                onClick = {
-                                                    viewModel.playSearchResult(pick)
-                                                    onNavigateToPlayer()
+                                if (isLoading && quickPicks.isEmpty()) {
+                                    // Skeleton: 3 rows of 2 placeholder cards
+                                    repeat(3) {
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                        ) {
+                                            repeat(2) {
+                                                Card(
+                                                    modifier = Modifier
+                                                        .weight(1f)
+                                                        .height(72.dp),
+                                                    shape = RoundedCornerShape(8.dp),
+                                                    colors = CardDefaults.cardColors(
+                                                        containerColor = MaterialTheme.colorScheme.surfaceVariant
+                                                    )
+                                                ) {
+                                                    Row(
+                                                        modifier = Modifier.fillMaxSize(),
+                                                        verticalAlignment = Alignment.CenterVertically
+                                                    ) {
+                                                        Box(
+                                                            modifier = Modifier
+                                                                .size(72.dp)
+                                                                .clip(RoundedCornerShape(topStart = 8.dp, bottomStart = 8.dp)),
+                                                            contentAlignment = Alignment.Center
+                                                        ) {
+                                                            Surface(
+                                                                modifier = Modifier.fillMaxSize(),
+                                                                color = MaterialTheme.colorScheme.surface.copy(alpha = 0.5f)
+                                                            ) {}
+                                                            CircularProgressIndicator(
+                                                                modifier = Modifier.size(20.dp),
+                                                                strokeWidth = 2.dp
+                                                            )
+                                                        }
+                                                        Column(
+                                                            modifier = Modifier
+                                                                .weight(1f)
+                                                                .padding(horizontal = 10.dp),
+                                                            verticalArrangement = Arrangement.spacedBy(6.dp)
+                                                        ) {
+                                                            Surface(
+                                                                modifier = Modifier
+                                                                    .fillMaxWidth(0.8f)
+                                                                    .height(12.dp),
+                                                                shape = RoundedCornerShape(4.dp),
+                                                                color = MaterialTheme.colorScheme.surface.copy(alpha = 0.5f)
+                                                            ) {}
+                                                            Surface(
+                                                                modifier = Modifier
+                                                                    .fillMaxWidth(0.5f)
+                                                                    .height(10.dp),
+                                                                shape = RoundedCornerShape(4.dp),
+                                                                color = MaterialTheme.colorScheme.surface.copy(alpha = 0.5f)
+                                                            ) {}
+                                                        }
+                                                    }
                                                 }
-                                            )
+                                            }
                                         }
-                                        if (rowItems.size == 1) Spacer(Modifier.weight(1f))
+                                    }
+                                } else {
+                                    val rows = quickPicks.chunked(2)
+                                    rows.forEach { rowItems ->
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                        ) {
+                                            rowItems.forEach { pick ->
+                                                QuickPickCard(
+                                                    modifier = Modifier.weight(1f),
+                                                    title = pick.title,
+                                                    artist = pick.artist,
+                                                    thumbnailUrl = pick.thumbnailUrl,
+                                                    onClick = {
+                                                        viewModel.playSearchResult(pick)
+                                                        onNavigateToPlayer()
+                                                    }
+                                                )
+                                            }
+                                            if (rowItems.size == 1) Spacer(Modifier.weight(1f))
+                                        }
                                     }
                                 }
                             }
@@ -302,7 +406,60 @@ fun HomeScreen(
                         )
                     }
 
-                    if (trendingSongs.isEmpty()) {
+                    if (isLoading && trendingSongs.isEmpty()) {
+                        items(5) {
+                            Card(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 8.dp, vertical = 4.dp),
+                                shape = RoundedCornerShape(12.dp),
+                                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+                            ) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(16.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Surface(
+                                        modifier = Modifier.size(56.dp),
+                                        shape = RoundedCornerShape(8.dp),
+                                        color = MaterialTheme.colorScheme.surfaceVariant
+                                    ) {
+                                        Box(
+                                            modifier = Modifier.fillMaxSize(),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            CircularProgressIndicator(
+                                                modifier = Modifier.size(20.dp),
+                                                strokeWidth = 2.dp
+                                            )
+                                        }
+                                    }
+                                    Spacer(Modifier.width(16.dp))
+                                    Column(
+                                        Modifier.weight(1f),
+                                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                                    ) {
+                                        Surface(
+                                            modifier = Modifier
+                                                .fillMaxWidth(0.7f)
+                                                .height(14.dp),
+                                            shape = RoundedCornerShape(4.dp),
+                                            color = MaterialTheme.colorScheme.surfaceVariant
+                                        ) {}
+                                        Surface(
+                                            modifier = Modifier
+                                                .fillMaxWidth(0.4f)
+                                                .height(10.dp),
+                                            shape = RoundedCornerShape(4.dp),
+                                            color = MaterialTheme.colorScheme.surfaceVariant
+                                        ) {}
+                                    }
+                                }
+                            }
+                        }
+                    } else if (trendingSongs.isEmpty()) {
                         item {
                             Column(
                                 modifier = Modifier
@@ -346,7 +503,6 @@ fun HomeScreen(
                             }
                         }
                     }
-                }
             }
         }
     }
@@ -370,7 +526,7 @@ private fun HomePlaylistCard(
     ) {
         Column(modifier = Modifier.padding(8.dp)) {
             if (!playlist.thumbnailUrl.isNullOrBlank()) {
-                AsyncImage(
+                SubcomposeAsyncImage(
                     model = ImageRequest.Builder(LocalContext.current)
                         .data(playlist.thumbnailUrl)
                         .crossfade(200)
@@ -380,7 +536,18 @@ private fun HomePlaylistCard(
                     modifier = Modifier
                         .fillMaxWidth()
                         .aspectRatio(1f)
-                        .clip(RoundedCornerShape(10.dp))
+                        .clip(RoundedCornerShape(10.dp)),
+                    loading = {
+                        Box(
+                            modifier = Modifier.fillMaxSize(),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(20.dp),
+                                strokeWidth = 2.dp
+                            )
+                        }
+                    }
                 )
             } else {
                 Surface(
@@ -459,31 +626,49 @@ private fun QuickPickCard(
             modifier = Modifier.fillMaxSize(),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            if (thumbnailUrl.isNotEmpty()) {
-                AsyncImage(
+            Box(
+                modifier = Modifier
+                    .size(72.dp)
+                    .clip(RoundedCornerShape(topStart = 8.dp, bottomStart = 8.dp)),
+                contentAlignment = Alignment.Center
+            ) {
+                SubcomposeAsyncImage(
                     model = ImageRequest.Builder(LocalContext.current)
-                        .data(thumbnailUrl)
+                        .data(thumbnailUrl.ifEmpty { null })
                         .crossfade(200)
                         .build(),
                     contentDescription = null,
                     contentScale = ContentScale.Crop,
-                    modifier = Modifier
-                        .size(72.dp)
-                        .clip(RoundedCornerShape(topStart = 8.dp, bottomStart = 8.dp))
+                    modifier = Modifier.fillMaxSize(),
+                    loading = {
+                        Surface(
+                            modifier = Modifier.fillMaxSize(),
+                            color = MaterialTheme.colorScheme.secondaryContainer
+                        ) {
+                            Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(20.dp),
+                                    strokeWidth = 2.dp
+                                )
+                            }
+                        }
+                    },
+                    error = {
+                        Surface(
+                            modifier = Modifier.fillMaxSize(),
+                            color = MaterialTheme.colorScheme.secondaryContainer
+                        ) {
+                            Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
+                                Icon(
+                                    Icons.Default.MusicNote,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(24.dp),
+                                    tint = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.5f)
+                                )
+                            }
+                        }
+                    }
                 )
-            } else {
-                Box(
-                    modifier = Modifier
-                        .size(72.dp)
-                        .clip(RoundedCornerShape(topStart = 8.dp, bottomStart = 8.dp)),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(
-                        Icons.Default.PlayArrow,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
             }
             Column(
                 modifier = Modifier

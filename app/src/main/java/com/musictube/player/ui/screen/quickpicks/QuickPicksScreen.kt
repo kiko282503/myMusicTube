@@ -20,7 +20,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.compose.ui.platform.LocalContext
-import coil.compose.AsyncImage
+import coil.compose.SubcomposeAsyncImage
 import coil.request.ImageRequest
 import com.musictube.player.viewmodel.QuickPicksViewModel
 
@@ -72,6 +72,21 @@ fun QuickPicksScreen(
                 isLoading -> {
                     CircularProgressIndicator(modifier = Modifier.align(Alignment.Center))
                 }
+                songs.isEmpty() -> {
+                    Column(
+                        modifier = Modifier.align(Alignment.Center),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Text(
+                            text = "Couldn't load quick picks",
+                            style = MaterialTheme.typography.bodyLarge
+                        )
+                        Button(onClick = { viewModel.loadMore() }) {
+                            Text("Retry")
+                        }
+                    }
+                }
                 else -> {
                     LazyColumn(
                         state = listState,
@@ -82,23 +97,36 @@ fun QuickPicksScreen(
                         // Render as 2-column grid rows
                         val rows = songs.chunked(2)
                         items(rows) { rowItems ->
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
-                            ) {
-                                rowItems.forEach { song ->
-                                    PickCard(
-                                        modifier = Modifier.weight(1f),
-                                        title = song.title,
-                                        artist = song.artist,
-                                        thumbnailUrl = song.thumbnailUrl,
-                                        onClick = {
-                                            viewModel.playSearchResult(song)
-                                            onNavigateToPlayer()
-                                        }
-                                    )
+                            if (rowItems.size == 2) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    rowItems.forEach { song ->
+                                        PickCard(
+                                            modifier = Modifier.weight(1f),
+                                            title = song.title,
+                                            artist = song.artist,
+                                            thumbnailUrl = song.thumbnailUrl,
+                                            onClick = {
+                                                viewModel.playSearchResult(song)
+                                                onNavigateToPlayer()
+                                            }
+                                        )
+                                    }
                                 }
-                                if (rowItems.size == 1) Spacer(Modifier.weight(1f))
+                            } else {
+                                // Last odd item — take full row width
+                                PickCard(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    title = rowItems[0].title,
+                                    artist = rowItems[0].artist,
+                                    thumbnailUrl = rowItems[0].thumbnailUrl,
+                                    onClick = {
+                                        viewModel.playSearchResult(rowItems[0])
+                                        onNavigateToPlayer()
+                                    }
+                                )
                             }
                         }
 
@@ -143,31 +171,48 @@ private fun PickCard(
             modifier = Modifier.fillMaxSize(),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            if (thumbnailUrl.isNotEmpty()) {
-                AsyncImage(
+            Box(
+                modifier = Modifier
+                    .size(72.dp)
+                    .clip(RoundedCornerShape(topStart = 8.dp, bottomStart = 8.dp)),
+                contentAlignment = Alignment.Center
+            ) {
+                SubcomposeAsyncImage(
                     model = ImageRequest.Builder(LocalContext.current)
-                        .data(thumbnailUrl)
+                        .data(thumbnailUrl.ifEmpty { null })
                         .crossfade(200)
                         .build(),
                     contentDescription = null,
                     contentScale = ContentScale.Crop,
-                    modifier = Modifier
-                        .size(72.dp)
-                        .clip(RoundedCornerShape(topStart = 8.dp, bottomStart = 8.dp))
+                    modifier = Modifier.fillMaxSize(),
+                    loading = {
+                        Surface(
+                            modifier = Modifier.fillMaxSize(),
+                            color = MaterialTheme.colorScheme.secondaryContainer
+                        ) {
+                            Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(20.dp),
+                                    strokeWidth = 2.dp
+                                )
+                            }
+                        }
+                    },
+                    error = {
+                        Surface(
+                            modifier = Modifier.fillMaxSize(),
+                            color = MaterialTheme.colorScheme.secondaryContainer
+                        ) {
+                            Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
+                                Icon(
+                                    Icons.Default.PlayArrow,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+                    }
                 )
-            } else {
-                Box(
-                    modifier = Modifier
-                        .size(72.dp)
-                        .clip(RoundedCornerShape(topStart = 8.dp, bottomStart = 8.dp)),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(
-                        Icons.Default.PlayArrow,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
             }
             Column(
                 modifier = Modifier

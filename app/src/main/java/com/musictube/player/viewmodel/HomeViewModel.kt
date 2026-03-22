@@ -115,8 +115,7 @@ class HomeViewModel @Inject constructor(
 
     init {
         ensureOfflinePlaylist()
-        loadTrendingSongs()
-        loadQuickPicks()
+        loadTrendingSongs() // quickPicks are derived inside after results arrive
     }
 
     private fun ensureOfflinePlaylist() {
@@ -132,13 +131,25 @@ class HomeViewModel @Inject constructor(
         viewModelScope.launch {
             _isLoading.value = true
             try {
-                val songOnlyResults = searchService.searchMusic(getRandomTrendingQuery(), songsOnly = true, maxPages = 2)
-                val results = if (songOnlyResults.isNotEmpty()) {
-                    songOnlyResults
-                } else {
-                    searchService.searchMusic(getRandomTrendingQuery(), songsOnly = false, maxPages = 2)
+                // Try the YT Music home feed browse API first — same source as the real app
+                var results = searchService.fetchHomeFeed()
+
+                // Fall back to a search query if the browse API returns nothing
+                if (results.isEmpty()) {
+                    val songOnlyResults = searchService.searchMusic(getRandomTrendingQuery(), songsOnly = true, maxPages = 1)
+                    results = if (songOnlyResults.isNotEmpty()) {
+                        songOnlyResults
+                    } else {
+                        searchService.searchMusic(getRandomTrendingQuery(), songsOnly = false, maxPages = 1)
+                    }
                 }
-                _trendingSongs.value = results.distinctBy { it.id }
+
+                val distinct = results.distinctBy { it.id }
+                _trendingSongs.value = distinct
+                // Derive quick picks from the same result set — no extra network call
+                if (_quickPicks.value.isEmpty()) {
+                    _quickPicks.value = distinct.take(6)
+                }
                 trendingPage = 1
             } catch (e: Exception) {
                 Log.e("HomeViewModel", "Failed to load trending songs", e)
@@ -181,29 +192,11 @@ class HomeViewModel @Inject constructor(
         }
     }
 
-    private fun loadQuickPicks() {
-        viewModelScope.launch {
-            try {
-                // Get YouTube search results only - no sample songs in production
-                val youtubResults = searchService.searchMusic(getRandomTrendingQuery(), songsOnly = true)
-                
-                // Take the first 6 results for Quick Picks
-                _quickPicks.value = youtubResults.take(6)
-                
-            } catch (e: Exception) {
-                Log.e("HomeViewModel", "Failed to load quick picks", e)
-                
-                // Fallback: Empty list if search fails
-                _quickPicks.value = emptyList()
-            }
-        }
-    }
-
     fun reloadTrending() {
         trendingPage = 0
         _trendingSongs.value = emptyList()
+        _quickPicks.value = emptyList()
         loadTrendingSongs()
-        loadQuickPicks()
     }
 
     fun playSearchResult(searchResult: SearchResult) {
