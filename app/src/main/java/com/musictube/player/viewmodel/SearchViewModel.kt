@@ -12,6 +12,7 @@ import com.musictube.player.service.DownloadStatus
 import com.musictube.player.service.MusicPlayerManager
 import com.musictube.player.service.OkHttpDownloader
 import com.musictube.player.service.SearchService
+import com.musictube.player.service.SearchStateHolder
 import com.musictube.player.service.YouTubeStreamService
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Job
@@ -30,15 +31,16 @@ class SearchViewModel @Inject constructor(
     private val searchService: SearchService,
     private val musicRepository: MusicRepository,
     private val playerManager: MusicPlayerManager,
-    private val downloadManager: DownloadManager
+    private val downloadManager: DownloadManager,
+    private val searchStateHolder: SearchStateHolder
 ) : ViewModel() {
 
     private val offlinePlaylistName = "Offline Downloads"
 
-    private val _searchQuery = MutableStateFlow("")
+    private val _searchQuery = MutableStateFlow(searchStateHolder.lastQuery)
     val searchQuery: StateFlow<String> = _searchQuery.asStateFlow()
 
-    private val _searchResults = MutableStateFlow<List<SearchResult>>(emptyList())
+    private val _searchResults = MutableStateFlow(searchStateHolder.lastResults)
     val searchResults: StateFlow<List<SearchResult>> = _searchResults.asStateFlow()
 
     private val _isLoading = MutableStateFlow(false)
@@ -54,9 +56,10 @@ class SearchViewModel @Inject constructor(
     // Continuation token from the last search page — used to fetch the real next page
     private var continuationToken: String? = null
 
-    // Expose download status/progress from DownloadManager
+    // Expose download status/progress/errors from DownloadManager
     val downloadStatus: StateFlow<Map<String, DownloadStatus>> = downloadManager.downloadStatus
     val downloadProgress: StateFlow<Map<String, Int>> = downloadManager.downloadProgress
+    val downloadErrors: StateFlow<Map<String, String>> = downloadManager.downloadErrors
 
     // DB-backed set of YouTube video IDs that are already downloaded (survives app restarts)
     val downloadedVideoIds: StateFlow<Set<String>> = musicRepository.getDownloadedSongs()
@@ -82,8 +85,15 @@ class SearchViewModel @Inject constructor(
 
     private var debounceJob: Job? = null
 
+    init {
+        // Restore pagination cursor so load-more works immediately after restore
+        continuationToken = searchStateHolder.continuationToken
+        _canLoadMore.value = searchStateHolder.canLoadMore
+    }
+
     fun updateSearchQuery(query: String) {
         _searchQuery.value = query
+        searchStateHolder.lastQuery = query
         debounceJob?.cancel()
         if (query.isNotEmpty()) {
             debounceJob = viewModelScope.launch {
@@ -101,6 +111,10 @@ class SearchViewModel @Inject constructor(
         _searchResults.value = emptyList()
         _canLoadMore.value = true
         continuationToken = null
+        searchStateHolder.lastQuery = ""
+        searchStateHolder.lastResults = emptyList()
+        searchStateHolder.continuationToken = null
+        searchStateHolder.canLoadMore = true
     }
 
     fun searchMusic() {
@@ -118,6 +132,9 @@ class SearchViewModel @Inject constructor(
                 val filtered = results.filter { it.itemType !in setOf("episode", "podcast") }
                 _searchResults.value = filtered
                 _canLoadMore.value = token != null
+                searchStateHolder.lastResults = filtered
+                searchStateHolder.continuationToken = token
+                searchStateHolder.canLoadMore = token != null
 
                 if (filtered.isEmpty()) {
                     _canLoadMore.value = false
@@ -201,7 +218,12 @@ class SearchViewModel @Inject constructor(
 
                     if (fresh.isNotEmpty()) {
                         existingIds.addAll(fresh.map { it.id })
-                        _searchResults.value = _searchResults.value + fresh
+                        val combined = _searchResults.value + fresh
+                        _searchResults.value = combined
+                        // Persist the expanded list
+                        searchStateHolder.lastResults = combined
+                        searchStateHolder.continuationToken = nextToken
+                        searchStateHolder.canLoadMore = nextToken != null
                         // Save the next token for the subsequent load-more call
                         continuationToken = nextToken
                         _canLoadMore.value = nextToken != null

@@ -103,6 +103,7 @@ class MusicPlayerManager @Inject constructor(
             addListener(object : Player.Listener {
                 override fun onIsPlayingChanged(isPlaying: Boolean) {
                     _isPlaying.value = isPlaying
+                    if (isPlaying) _isLoadingStream.value = false
                 }
 
                 override fun onPlaybackStateChanged(playbackState: Int) {
@@ -512,10 +513,9 @@ class MusicPlayerManager @Inject constructor(
 
         startNotificationService(title, artist, thumbnailUrl)
 
+        _isLoadingStream.value = true
         scope.launch {
-            _isLoadingStream.value = true
             val audioUrl = youTubeStreamService.extractAudioUrl(videoId)
-            _isLoadingStream.value = false
             if (audioUrl != null) {
                 val mediaItem = MediaItem.Builder()
                     .setUri(audioUrl)
@@ -524,7 +524,9 @@ class MusicPlayerManager @Inject constructor(
                 exoPlayer.setMediaItem(mediaItem)
                 exoPlayer.prepare()
                 exoPlayer.play()
+                // _isLoadingStream is cleared in onIsPlayingChanged(true)
             } else {
+                _isLoadingStream.value = false
                 android.util.Log.e("MusicPlayerManager", "Failed to extract audio URL for $videoId")
             }
         }

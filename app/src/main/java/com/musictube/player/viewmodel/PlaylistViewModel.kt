@@ -74,6 +74,12 @@ class PlaylistViewModel @Inject constructor(
     private val _message = MutableStateFlow<String?>(null)
     val message: StateFlow<String?> = _message.asStateFlow()
 
+    val isShuffleOn: StateFlow<Boolean> = playerManager.isShuffleOn
+    val isRepeatOn: StateFlow<Boolean> = playerManager.isRepeatOn
+
+    fun toggleShuffle() = playerManager.toggleShuffle()
+    fun toggleRepeat() = playerManager.toggleRepeat()
+
     fun playSong(song: Song) {
         val allSongs = songs.value
         val index = allSongs.indexOfFirst { it.id == song.id }.coerceAtLeast(0)
@@ -86,7 +92,8 @@ class PlaylistViewModel @Inject constructor(
     fun playPlaylistFromStart() {
         val allSongs = songs.value
         if (allSongs.isEmpty()) return
-        playerManager.setPlaylistQueue(allSongs, 0)
+        val startIndex = if (playerManager.isShuffleOn.value) allSongs.indices.random() else 0
+        playerManager.setPlaylistQueue(allSongs, startIndex)
     }
 
     fun removeSong(songId: String) {

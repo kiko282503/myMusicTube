@@ -13,8 +13,8 @@ val PurpleGrey40 = Color(0xFF625b71)
 val Pink40 = Color(0xFF7D5260)
 
 // Music app colors
-val MusicPrimary = Color(0xFF1DB954) // Spotify-like green
-val MusicPrimaryVariant = Color(0xFF1ED760)
+val MusicPrimary = Color(0xFF7C3AED) // Deep purple
+val MusicPrimaryVariant = Color(0xFF9D5CF6) // Light purple
 val MusicSecondary = Color(0xFF191414) // Dark background
 val MusicBackground = Color(0xFF121212)
 val MusicSurface = Color(0xFF282828)

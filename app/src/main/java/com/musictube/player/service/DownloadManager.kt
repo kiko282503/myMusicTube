@@ -7,11 +7,14 @@ import com.musictube.player.data.repository.MusicRepository
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -34,6 +37,9 @@ class DownloadManager @Inject constructor(
 ) {
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
 
+    // Limit to 2 concurrent downloads to avoid YouTube API rate-limiting
+    private val downloadSemaphore = Semaphore(2)
+
     private val _downloadStatus = MutableStateFlow<Map<String, DownloadStatus>>(emptyMap())
     val downloadStatus: StateFlow<Map<String, DownloadStatus>> = _downloadStatus.asStateFlow()
 
@@ -43,6 +49,11 @@ class DownloadManager @Inject constructor(
     private val _downloadErrors = MutableStateFlow<Map<String, String>>(emptyMap())
     val downloadErrors: StateFlow<Map<String, String>> = _downloadErrors.asStateFlow()
 
+    // Tracks every download ever enqueued this session (id → SearchResult) so the Downloads
+    // screen can show title/artist/thumbnail for all entries regardless of current search query.
+    private val _downloadQueue = MutableStateFlow<Map<String, SearchResult>>(emptyMap())
+    val downloadQueue: StateFlow<Map<String, SearchResult>> = _downloadQueue.asStateFlow()
+
     fun downloadSong(
         searchResult: SearchResult,
         playlistName: String = "Offline Downloads"
@@ -51,6 +62,16 @@ class DownloadManager @Inject constructor(
             Log.w("DownloadManager", "Attempted to download non-playable item: ${searchResult.id}")
             return
         }
+
+        // Prevent duplicate downloads: skip if already downloading or completed
+        val existingStatus = _downloadStatus.value[searchResult.id]
+        if (existingStatus == DownloadStatus.DOWNLOADING || existingStatus == DownloadStatus.COMPLETED) {
+            Log.i("DownloadManager", "Skipping duplicate download for ${searchResult.id} (status=$existingStatus)")
+            return
+        }
+
+        // Register song details so Downloads screen can display title/artist/thumbnail
+        _downloadQueue.value = _downloadQueue.value + (searchResult.id to searchResult)
 
         scope.launch {
             val statusMap = _downloadStatus.value.toMutableMap()
@@ -66,14 +87,27 @@ class DownloadManager @Inject constructor(
             errorMap.remove(searchResult.id)
             _downloadErrors.value = errorMap
 
+            downloadSemaphore.withPermit {
             try {
                 Log.d("DownloadManager", "Starting download for ${searchResult.id}: ${searchResult.title}")
 
                 val playlistId = getOrCreatePlaylist(playlistName)
 
-                val audioUrl = searchResult.audioUrl
-                    ?: extractBestAudioUrl(searchResult)
-                    ?: throw IllegalStateException("Could not extract downloadable audio URL")
+                // Retry extraction up to 3 times with increasing delays to handle rate-limiting
+                var audioUrl: String? = searchResult.audioUrl
+                if (audioUrl == null) {
+                    val maxAttempts = 3
+                    for (attempt in 1..maxAttempts) {
+                        audioUrl = extractBestAudioUrl(searchResult)
+                        if (audioUrl != null) break
+                        if (attempt < maxAttempts) {
+                            val delayMs = attempt * 3000L
+                            Log.w("DownloadManager", "Extraction attempt $attempt failed for ${searchResult.id}, retrying in ${delayMs}ms")
+                            delay(delayMs)
+                        }
+                    }
+                }
+                if (audioUrl == null) throw IllegalStateException("Could not extract downloadable audio URL after retries. YouTube may be rate-limiting — please wait a moment and try again.")
 
                 Log.d("DownloadManager", "Downloading audio from: $audioUrl")
 
@@ -123,6 +157,7 @@ class DownloadManager @Inject constructor(
                 errorMap[searchResult.id] = e.message ?: "Unknown error"
                 _downloadErrors.value = errorMap
             }
+            } // end downloadSemaphore.withPermit
         }
     }
 
@@ -135,25 +170,34 @@ class DownloadManager @Inject constructor(
                 return@withContext primary
             }
 
-            // Fallback: broaden query and try alternates from fresh search.
+            // Fallback: search for the same song and try alternate video IDs.
+            // Include artist in query and REQUIRE the result to match the artist
+            // to prevent wrong-artist substitution (e.g. Pink Floyd instead of Korn cover).
             val query = when {
-                searchResult.artist.isNotBlank() -> "${searchResult.title} ${searchResult.artist} official audio"
+                searchResult.artist.isNotBlank() -> "${searchResult.artist} ${searchResult.title}"
                 else -> "${searchResult.title} official audio"
             }
 
-            Log.d("DownloadManager", "Primary failed, broadening search with: $query")
+            Log.d("DownloadManager", "Primary failed, fallback search: $query")
 
-            val alternates = searchService.searchMusic(query, songsOnly = false)
+            val artistLower = searchResult.artist.trim().lowercase()
+            val alternates = searchService.searchMusic(query, songsOnly = true)
                 .asSequence()
                 .filter { it.isPlayable && it.id.isNotBlank() && it.id != searchResult.id }
+                // Only accept results from the same artist (guards against wrong-artist substitution)
+                .filter { candidate ->
+                    artistLower.isEmpty() ||
+                    candidate.artist.trim().lowercase().contains(artistLower) ||
+                    artistLower.contains(candidate.artist.trim().lowercase())
+                }
                 .distinctBy { it.id }
-                .take(12)
+                .take(8)
                 .toList()
 
             for (candidate in alternates) {
                 val alt = youTubeStreamService.extractAudioUrl(candidate.id)
                 if (alt != null) {
-                    Log.d("DownloadManager", "Found alternate audio for ${searchResult.id} using ${candidate.id}")
+                    Log.d("DownloadManager", "Found alternate audio for ${searchResult.id} using ${candidate.id} (${candidate.artist} - ${candidate.title})")
                     return@withContext alt
                 }
             }

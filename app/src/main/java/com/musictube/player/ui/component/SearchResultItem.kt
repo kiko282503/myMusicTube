@@ -28,6 +28,7 @@ fun SearchResultItem(
     searchResult: SearchResult,
     downloadStatus: DownloadStatus,
     downloadProgress: Int = 0,
+    downloadError: String? = null,
     onDownload: () -> Unit,
     onPlay: () -> Unit,
     modifier: Modifier = Modifier
@@ -182,15 +183,27 @@ fun SearchResultItem(
                         )
                     }
                     DownloadStatus.FAILED -> {
-                        IconButton(
-                            onClick = onDownload,
-                            modifier = Modifier.size(36.dp)
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally
                         ) {
-                            Icon(
-                                Icons.Default.ErrorOutline,
-                                contentDescription = "Retry download",
-                                tint = MaterialTheme.colorScheme.error
-                            )
+                            IconButton(
+                                onClick = onDownload,
+                                modifier = Modifier.size(36.dp)
+                            ) {
+                                Icon(
+                                    Icons.Default.ErrorOutline,
+                                    contentDescription = "Retry download",
+                                    tint = MaterialTheme.colorScheme.error
+                                )
+                            }
+                            if (downloadError != null && downloadError.contains("rate", ignoreCase = true)) {
+                                Text(
+                                    text = "Rate limited",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.error,
+                                    maxLines = 1
+                                )
+                            }
                         }
                     }
                 }

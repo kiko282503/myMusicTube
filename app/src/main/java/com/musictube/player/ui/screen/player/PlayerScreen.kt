@@ -6,7 +6,10 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.draw.clip
 import android.content.Context
 import android.media.AudioManager
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
@@ -67,6 +70,7 @@ fun PlayerScreen(
     val context = LocalContext.current
     
     var showPlaylistDialog by remember { mutableStateOf(false) }
+    var showCreatePlaylistDialog by remember { mutableStateOf(false) }
     var newPlaylistName by remember { mutableStateOf("") }
 
     // Ensure the WebView is created (and permanently attached to the Activity content view)
@@ -445,14 +449,20 @@ fun PlayerScreen(
                         )
                     }
                 } else {
-                    LazyColumn {
-                        items(playlists) { playlist ->
-                            TextButton(
-                                onClick = {
-                                    viewModel.addCurrentSongToPlaylist(playlist.id)
-                                    showPlaylistDialog = false
-                                },
-                                modifier = Modifier.fillMaxWidth()
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .verticalScroll(rememberScrollState())
+                    ) {
+                        playlists.forEach { playlist ->
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable {
+                                        viewModel.addCurrentSongToPlaylist(playlist.id)
+                                        showPlaylistDialog = false
+                                    }
+                                    .padding(vertical = 14.dp, horizontal = 4.dp)
                             ) {
                                 Text(
                                     text = playlist.name,
@@ -461,36 +471,67 @@ fun PlayerScreen(
                                 )
                             }
                         }
-                        item {
-                            Divider()
-                            TextButton(
-                                onClick = { },
-                                modifier = Modifier.fillMaxWidth()
-                            ) {
-                                Text("New Playlist")
-                            }
+                        Divider()
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable {
+                                    showPlaylistDialog = false
+                                    showCreatePlaylistDialog = true
+                                }
+                                .padding(vertical = 14.dp, horizontal = 4.dp)
+                        ) {
+                            Text(
+                                text = "New Playlist",
+                                color = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.fillMaxWidth(),
+                                textAlign = TextAlign.Start
+                            )
                         }
                     }
                 }
             },
+            confirmButton = {},
+            dismissButton = {
+                Button(onClick = { showPlaylistDialog = false }) { Text("Cancel") }
+            }
+        )
+    }
+
+    // Create new playlist dialog
+    if (showCreatePlaylistDialog) {
+        AlertDialog(
+            onDismissRequest = {
+                showCreatePlaylistDialog = false
+                newPlaylistName = ""
+            },
+            title = { Text("New Playlist") },
+            text = {
+                OutlinedTextField(
+                    value = newPlaylistName,
+                    onValueChange = { newPlaylistName = it },
+                    label = { Text("Playlist name") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+            },
             confirmButton = {
-                if (playlists.isEmpty() && newPlaylistName.isNotBlank()) {
-                    Button(
-                        onClick = {
+                Button(
+                    onClick = {
+                        if (newPlaylistName.isNotBlank()) {
                             viewModel.createPlaylist(newPlaylistName)
                             newPlaylistName = ""
-                            showPlaylistDialog = false
+                            showCreatePlaylistDialog = false
                         }
-                    ) {
-                        Text("Create & Add")
-                    }
-                } else {
-                    Button(
-                        onClick = { showPlaylistDialog = false }
-                    ) {
-                        Text("Cancel")
-                    }
-                }
+                    },
+                    enabled = newPlaylistName.isNotBlank()
+                ) { Text("Create & Add") }
+            },
+            dismissButton = {
+                TextButton(onClick = {
+                    showCreatePlaylistDialog = false
+                    newPlaylistName = ""
+                }) { Text("Cancel") }
             }
         )
     }

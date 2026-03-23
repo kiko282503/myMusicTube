@@ -36,6 +36,7 @@ fun SearchScreen(
     val canLoadMore by viewModel.canLoadMore.collectAsState()
     val downloadStatus by viewModel.downloadStatus.collectAsState()
     val downloadProgress by viewModel.downloadProgress.collectAsState()
+    val downloadErrors by viewModel.downloadErrors.collectAsState()
     val downloadedVideoIds by viewModel.downloadedVideoIds.collectAsState()
     val keyboardController = LocalSoftwareKeyboardController.current
     
@@ -121,7 +122,7 @@ fun SearchScreen(
                 ),
                 singleLine = true
             )
-            
+
             // Search results
             Box(
                 modifier = Modifier.weight(1f)
@@ -166,6 +167,7 @@ fun SearchScreen(
                                     downloadStatus = if (result.id in downloadedVideoIds) DownloadStatus.COMPLETED
                                                      else (downloadStatus[result.id] ?: DownloadStatus.IDLE),
                                     downloadProgress = downloadProgress[result.id] ?: 0,
+                                    downloadError = downloadErrors[result.id],
                                     onDownload = { viewModel.downloadSong(result) },
                                     onPlay = {
                                         viewModel.playSearchResult(result)
