@@ -71,6 +71,12 @@ class QuickPicksViewModel @Inject constructor(
     fun playSearchResult(searchResult: SearchResult) {
         if (!searchResult.isPlayable) return
 
+        // If this song is already playing or loading (e.g. via preview), just navigate
+        // to the player without restarting — let it continue from where it is.
+        val alreadyCurrent = playerManager.currentVideoId.value == searchResult.id
+        val activeStream = playerManager.isPlaying.value || playerManager.isLoadingStream.value
+        if (alreadyCurrent && activeStream) return
+
         playerManager.playYouTubeAudioStream(
             videoId = searchResult.id,
             title = searchResult.title,

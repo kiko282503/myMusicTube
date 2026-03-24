@@ -24,6 +24,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.Dispatchers
 import javax.inject.Inject
 
 @HiltViewModel
@@ -32,7 +33,8 @@ class SearchViewModel @Inject constructor(
     private val musicRepository: MusicRepository,
     private val playerManager: MusicPlayerManager,
     private val downloadManager: DownloadManager,
-    private val searchStateHolder: SearchStateHolder
+    private val searchStateHolder: SearchStateHolder,
+    private val youTubeStreamService: YouTubeStreamService
 ) : ViewModel() {
 
     private val offlinePlaylistName = "Offline Downloads"
@@ -55,6 +57,11 @@ class SearchViewModel @Inject constructor(
 
     // Continuation token from the last search page — used to fetch the real next page
     private var continuationToken: String? = null
+
+    // Expose player preview state so the search list can show play/pause per item
+    val previewVideoId: StateFlow<String?> = playerManager.currentVideoId
+    val previewIsPlaying: StateFlow<Boolean> = playerManager.isPlaying
+    val previewIsLoading: StateFlow<Boolean> = playerManager.isLoadingStream
 
     // Expose download status/progress/errors from DownloadManager
     val downloadStatus: StateFlow<Map<String, DownloadStatus>> = downloadManager.downloadStatus
@@ -107,6 +114,8 @@ class SearchViewModel @Inject constructor(
     }
 
     fun clearSearch() {
+        // Stop preview before wiping results (stopPreviewIfActive checks the results list)
+        stopPreviewIfActive()
         _searchQuery.value = ""
         _searchResults.value = emptyList()
         _canLoadMore.value = true
@@ -117,9 +126,24 @@ class SearchViewModel @Inject constructor(
         searchStateHolder.canLoadMore = true
     }
 
+    /**
+     * Stop audio only if the current song is a preview playing from the search screen
+     * (i.e. not something the user explicitly navigated to the player for).
+     */
+    fun stopPreviewIfActive() {
+        val currentId = playerManager.currentVideoId.value ?: return
+        val isFromSearch = _searchResults.value.any { it.id == currentId }
+        if (isFromSearch && (playerManager.isPlaying.value || playerManager.isLoadingStream.value)) {
+            playerManager.pause()
+        }
+    }
+
     fun searchMusic() {
         viewModelScope.launch {
             if (_searchQuery.value.isBlank()) return@launch
+
+            // Stop any in-progress preview before loading new results
+            stopPreviewIfActive()
 
             _isLoading.value = true
             _errorMessage.value = null
@@ -129,7 +153,10 @@ class SearchViewModel @Inject constructor(
             try {
                 val (results, token) = searchService.searchMusicPaged(_searchQuery.value, songsOnly = true)
                 continuationToken = token
-                val filtered = results.filter { it.itemType !in setOf("episode", "podcast") }
+                val filtered = results
+                    .filter { it.itemType !in setOf("episode", "podcast") }
+                    .distinctBy { it.id }
+                    .distinctBy { "${it.title.trim().lowercase()}|${it.artist.trim().lowercase()}" }
                 _searchResults.value = filtered
                 _canLoadMore.value = token != null
                 searchStateHolder.lastResults = filtered
@@ -139,6 +166,13 @@ class SearchViewModel @Inject constructor(
                 if (filtered.isEmpty()) {
                     _canLoadMore.value = false
                     _errorMessage.value = "No results found for '${_searchQuery.value}'"
+                } else {
+                    // Prefetch audio URLs for the first 20 results in background so
+                    // tapping play is near-instant (results land in the URL cache)
+                    val toWarm = filtered.filter { it.isPlayable }.take(20)
+                    viewModelScope.launch(Dispatchers.IO) {
+                        toWarm.forEach { youTubeStreamService.prefetchAudioUrl(it.id) }
+                    }
                 }
             } catch (e: Exception) {
                 _errorMessage.value = "Search failed: ${e.message}"
@@ -156,13 +190,39 @@ class SearchViewModel @Inject constructor(
             return
         }
 
-        // Use YouTube WebView embed - no audio extraction needed
+        // If this song is already playing or loading (e.g. via preview), just navigate
+        // to the player without restarting — let it continue from where it is.
+        val alreadyCurrent = playerManager.currentVideoId.value == searchResult.id
+        val activeStream = playerManager.isPlaying.value || playerManager.isLoadingStream.value
+        if (alreadyCurrent && activeStream) return
+
         playerManager.playYouTubeAudioStream(
             videoId = searchResult.id,
             title = searchResult.title,
             artist = searchResult.artist,
             thumbnailUrl = searchResult.thumbnailUrl
         )
+    }
+
+    /** Play or pause a preview of [searchResult] inline without navigating to the player page. */
+    fun togglePreview(searchResult: SearchResult) {
+        if (!searchResult.isPlayable) return
+        when {
+            playerManager.currentVideoId.value == searchResult.id && playerManager.isPlaying.value -> {
+                playerManager.pause()
+            }
+            playerManager.currentVideoId.value == searchResult.id && !playerManager.isPlaying.value -> {
+                playerManager.resume()
+            }
+            else -> {
+                playerManager.playYouTubeAudioStream(
+                    videoId = searchResult.id,
+                    title = searchResult.title,
+                    artist = searchResult.artist,
+                    thumbnailUrl = searchResult.thumbnailUrl
+                )
+            }
+        }
     }
 
     fun addSongToSelectedPlaylist(searchResult: SearchResult) {
@@ -204,6 +264,9 @@ class SearchViewModel @Inject constructor(
         viewModelScope.launch {
             try {
                 val existingIds = _searchResults.value.map { it.id }.toMutableSet()
+                val existingTitleArtist = _searchResults.value
+                    .map { "${it.title.trim().lowercase()}|${it.artist.trim().lowercase()}" }
+                    .toMutableSet()
                 var currentToken: String = token
                 var skips = 0
                 val maxSkips = 10
@@ -213,11 +276,14 @@ class SearchViewModel @Inject constructor(
                     val (newResults, nextToken) = searchService.fetchContinuation(currentToken, songsOnly = true)
 
                     val fresh = newResults.filter {
-                        it.id !in existingIds && it.itemType !in setOf("episode", "podcast")
+                        it.id !in existingIds &&
+                        it.itemType !in setOf("episode", "podcast") &&
+                        "${it.title.trim().lowercase()}|${it.artist.trim().lowercase()}" !in existingTitleArtist
                     }
 
                     if (fresh.isNotEmpty()) {
                         existingIds.addAll(fresh.map { it.id })
+                        existingTitleArtist.addAll(fresh.map { "${it.title.trim().lowercase()}|${it.artist.trim().lowercase()}" })
                         val combined = _searchResults.value + fresh
                         _searchResults.value = combined
                         // Persist the expanded list

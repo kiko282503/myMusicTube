@@ -38,6 +38,9 @@ fun SearchScreen(
     val downloadProgress by viewModel.downloadProgress.collectAsState()
     val downloadErrors by viewModel.downloadErrors.collectAsState()
     val downloadedVideoIds by viewModel.downloadedVideoIds.collectAsState()
+    val previewVideoId by viewModel.previewVideoId.collectAsState()
+    val previewIsPlaying by viewModel.previewIsPlaying.collectAsState()
+    val previewIsLoading by viewModel.previewIsLoading.collectAsState()
     val keyboardController = LocalSoftwareKeyboardController.current
     
     // Lazy list state for infinite scroll
@@ -77,7 +80,10 @@ fun SearchScreen(
             TopAppBar(
                 title = { Text("Search Music") },
                 navigationIcon = {
-                    IconButton(onClick = onNavigateBack) {
+                    IconButton(onClick = {
+                        viewModel.clearSearch()
+                        onNavigateBack()
+                    }) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
                     }
                 }
@@ -168,10 +174,16 @@ fun SearchScreen(
                                                      else (downloadStatus[result.id] ?: DownloadStatus.IDLE),
                                     downloadProgress = downloadProgress[result.id] ?: 0,
                                     downloadError = downloadErrors[result.id],
+                                    isPreviewPlaying = previewVideoId == result.id && previewIsPlaying,
+                                    isPreviewLoading = previewVideoId == result.id && previewIsLoading,
+                                    onPreviewPlay = {
+                                        keyboardController?.hide()
+                                        viewModel.togglePreview(result)
+                                    },
                                     onDownload = { viewModel.downloadSong(result) },
                                     onPlay = {
                                         viewModel.playSearchResult(result)
-                                        keyboardController?.hide() // Hide keyboard before navigation
+                                        keyboardController?.hide()
                                         onNavigateToPlayer()
                                     }
                                 )

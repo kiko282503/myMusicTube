@@ -24,12 +24,15 @@ import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.LibraryMusic
+import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.RemoveCircleOutline
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Repeat
 import androidx.compose.material.icons.filled.Shuffle
+import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -41,6 +44,7 @@ import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -55,6 +59,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.musictube.player.data.model.Playlist
@@ -81,6 +87,13 @@ fun PlaylistScreen(
 
     val isShuffleOn by viewModel.isShuffleOn.collectAsState()
     val isRepeatOn by viewModel.isRepeatOn.collectAsState()
+    val currentSong by viewModel.currentSong.collectAsState()
+    val isPlayingNow by viewModel.isPlaying.collectAsState()
+    val miniPlayerPosition by viewModel.currentPosition.collectAsState()
+    val miniPlayerDuration by viewModel.duration.collectAsState()
+    val miniPlayerQueueSize by viewModel.playQueueSize.collectAsState()
+    // A song from this playlist is the active one when its id matches currentSong
+    val playingSongId = currentSong?.id
     val snackbarHostState = remember { SnackbarHostState() }
     var selectedSong by remember { mutableStateOf<Song?>(null) }
     // Captured before the action sheet closes so it survives onDismissRequest nulling selectedSong
@@ -108,6 +121,88 @@ fun PlaylistScreen(
                     }
                 }
             )
+        },
+        bottomBar = {
+            // ─── NOW-PLAYING MINI-PLAYER BAR ─────────────────────────────────
+            val song = currentSong
+            if (song != null) {
+                Surface(
+                    tonalElevation = 8.dp,
+                    shadowElevation = 8.dp,
+                    color = MaterialTheme.colorScheme.surfaceVariant
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 8.dp, vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .weight(1f)
+                                .clickable { onNavigateToPlayer() }
+                                .padding(horizontal = 8.dp, vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            Icon(
+                                Icons.Default.MusicNote,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(28.dp)
+                            )
+                            Column {
+                                Text(
+                                    text = song.title,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    fontWeight = FontWeight.SemiBold,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                                Text(
+                                    text = song.artist,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+                        }
+                        Box(contentAlignment = Alignment.Center) {
+                            if (miniPlayerDuration > 0) {
+                                CircularProgressIndicator(
+                                    progress = {
+                                        (miniPlayerPosition.toFloat() / miniPlayerDuration.toFloat()).coerceIn(0f, 1f)
+                                    },
+                                    modifier = Modifier.size(44.dp),
+                                    strokeWidth = 2.5.dp,
+                                    trackColor = MaterialTheme.colorScheme.surfaceVariant
+                                )
+                            }
+                            IconButton(
+                                onClick = { if (isPlayingNow) viewModel.pausePlayback() else viewModel.resume() },
+                                modifier = Modifier.size(44.dp)
+                            ) {
+                                Icon(
+                                    if (isPlayingNow) Icons.Default.Pause else Icons.Default.PlayArrow,
+                                    contentDescription = if (isPlayingNow) "Pause" else "Play",
+                                    tint = MaterialTheme.colorScheme.primary
+                                )
+                            }
+                        }
+                        if (miniPlayerQueueSize > 1) {
+                            IconButton(onClick = { viewModel.playNext() }) {
+                                Icon(
+                                    Icons.Default.SkipNext,
+                                    contentDescription = "Next",
+                                    tint = MaterialTheme.colorScheme.onSurface
+                                )
+                            }
+                        }
+                    }
+                }
+            }
         }
     ) { paddingValues ->
         when {
@@ -151,14 +246,25 @@ fun PlaylistScreen(
                     ) {
                         Button(
                             onClick = {
-                                viewModel.playPlaylistFromStart()
-                                onNavigateToPlayer()
+                                if (isPlayingNow && songs.any { it.id == playingSongId }) {
+                                    viewModel.pausePlayback()
+                                } else {
+                                    viewModel.playPlaylistFromStart()
+                                    onNavigateToPlayer()
+                                }
                             },
                             modifier = Modifier.weight(1f)
                         ) {
-                            Icon(Icons.Default.PlayArrow, contentDescription = null)
+                            Icon(
+                                if (isPlayingNow && songs.any { it.id == playingSongId })
+                                    Icons.Default.Pause else Icons.Default.PlayArrow,
+                                contentDescription = null
+                            )
                             Spacer(modifier = Modifier.width(4.dp))
-                            Text("Play Playlist")
+                            Text(
+                                if (isPlayingNow && songs.any { it.id == playingSongId })
+                                    "Pause" else "Play Playlist"
+                            )
                         }
                         IconButton(
                             onClick = { viewModel.toggleShuffle() },
@@ -194,6 +300,7 @@ fun PlaylistScreen(
                         items(songs, key = { it.id }) { song ->
                             PlaylistSongRow(
                                 song = song,
+                                isPlaying = song.id == playingSongId && isPlayingNow,
                                 downloadStatus = downloadStatus[song.id] ?: DownloadStatus.IDLE,
                                 downloadProgress = downloadProgress[song.id] ?: 0,
                                 onPlay = {
@@ -360,6 +467,7 @@ fun PlaylistScreen(
 @Composable
 private fun PlaylistSongRow(
     song: Song,
+    isPlaying: Boolean,
     downloadStatus: DownloadStatus,
     downloadProgress: Int,
     onPlay: () -> Unit,
@@ -373,6 +481,7 @@ private fun PlaylistSongRow(
     ) {
         SongItem(
             song = song,
+            isPlaying = isPlaying,
             onClick = onPlay,
             onLikeClick = onLikeClick,
             modifier = Modifier.weight(1f)

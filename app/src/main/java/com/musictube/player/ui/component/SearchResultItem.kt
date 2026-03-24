@@ -6,6 +6,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.ErrorOutline
+import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material3.*
@@ -29,7 +30,10 @@ fun SearchResultItem(
     downloadStatus: DownloadStatus,
     downloadProgress: Int = 0,
     downloadError: String? = null,
+    isPreviewPlaying: Boolean = false,
+    isPreviewLoading: Boolean = false,
     onDownload: () -> Unit,
+    onPreviewPlay: () -> Unit,
     onPlay: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -146,8 +150,52 @@ fun SearchResultItem(
                 }
             }
             
-            Spacer(modifier = Modifier.width(8.dp))
-            
+            Spacer(modifier = Modifier.width(4.dp))
+
+            // Inline preview play/pause button
+            if (searchResult.isPlayable) {
+                when {
+                    isPreviewLoading -> {
+                        Box(
+                            modifier = Modifier.size(36.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(20.dp),
+                                strokeWidth = 2.dp,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                        }
+                    }
+                    isPreviewPlaying -> {
+                        IconButton(
+                            onClick = onPreviewPlay,
+                            modifier = Modifier.size(36.dp)
+                        ) {
+                            Icon(
+                                Icons.Default.Pause,
+                                contentDescription = "Pause preview",
+                                tint = MaterialTheme.colorScheme.primary
+                            )
+                        }
+                    }
+                    else -> {
+                        IconButton(
+                            onClick = onPreviewPlay,
+                            modifier = Modifier.size(36.dp)
+                        ) {
+                            Icon(
+                                Icons.Default.PlayArrow,
+                                contentDescription = "Play preview",
+                                tint = MaterialTheme.colorScheme.primary
+                            )
+                        }
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.width(4.dp))
+
             // Download action
             if (searchResult.isPlayable) {
                 when (downloadStatus) {

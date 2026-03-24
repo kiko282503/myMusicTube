@@ -58,6 +58,9 @@ fun HomeScreen(
     val miniPlayerPosition by viewModel.currentPosition.collectAsState()
     val miniPlayerDuration by viewModel.duration.collectAsState()
     val miniPlayerQueueSize by viewModel.playQueueSize.collectAsState()
+    val previewVideoId by viewModel.previewVideoId.collectAsState()
+    val previewIsPlaying by viewModel.previewIsPlaying.collectAsState()
+    val previewIsLoading by viewModel.previewIsLoading.collectAsState()
 
     val homePlaylists by remember(playlists, offlinePlaylistId) {
         derivedStateOf {
@@ -482,6 +485,9 @@ fun HomeScreen(
                                 downloadStatus = if (result.id in downloadedVideoIds) DownloadStatus.COMPLETED
                                                  else (downloadStatus[result.id] ?: DownloadStatus.IDLE),
                                 downloadProgress = downloadProgress[result.id] ?: 0,
+                                isPreviewPlaying = previewVideoId == result.id && previewIsPlaying,
+                                isPreviewLoading = previewVideoId == result.id && previewIsLoading,
+                                onPreviewPlay = { viewModel.togglePreview(result) },
                                 onDownload = { viewModel.downloadSong(result) },
                                 onPlay = {
                                     viewModel.playSearchResult(result)

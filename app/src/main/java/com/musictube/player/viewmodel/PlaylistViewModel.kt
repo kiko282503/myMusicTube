@@ -6,11 +6,13 @@ import androidx.lifecycle.viewModelScope
 import com.musictube.player.data.model.Playlist
 import com.musictube.player.data.model.Song
 import com.musictube.player.data.repository.MusicRepository
+import com.musictube.player.service.DownloadManager
 import com.musictube.player.service.DownloadStatus
 import com.musictube.player.service.MusicPlayerManager
 import com.musictube.player.service.OkHttpDownloader
 import com.musictube.player.service.YouTubeStreamService
 import dagger.hilt.android.lifecycle.HiltViewModel
+import android.util.Log
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -27,7 +29,8 @@ class PlaylistViewModel @Inject constructor(
     private val repository: MusicRepository,
     private val playerManager: MusicPlayerManager,
     private val youTubeStreamService: YouTubeStreamService,
-    private val downloader: OkHttpDownloader
+    private val downloader: OkHttpDownloader,
+    private val downloadManager: DownloadManager
 ) : ViewModel() {
 
     private val offlinePlaylistName = "Offline Downloads"
@@ -77,10 +80,23 @@ class PlaylistViewModel @Inject constructor(
     val isShuffleOn: StateFlow<Boolean> = playerManager.isShuffleOn
     val isRepeatOn: StateFlow<Boolean> = playerManager.isRepeatOn
 
+    // Expose playback state so the screen can highlight the active song
+    val currentSong: StateFlow<com.musictube.player.data.model.Song?> = playerManager.currentSong
+    val isPlaying: StateFlow<Boolean> = playerManager.isPlaying
+    val currentPosition: StateFlow<Long> = playerManager.currentPosition
+    val duration: StateFlow<Long> = playerManager.duration
+    val playQueueSize: StateFlow<Int> = playerManager.playQueueSize
+
     fun toggleShuffle() = playerManager.toggleShuffle()
     fun toggleRepeat() = playerManager.toggleRepeat()
+    fun pausePlayback() = playerManager.pause()
+    fun resume() = playerManager.resume()
+    fun playNext() = playerManager.playNext()
 
     fun playSong(song: Song) {
+        // If this song is already the active one, don't restart it — just let it keep playing
+        if (playerManager.currentSong.value?.id == song.id) return
+
         val allSongs = songs.value
         val index = allSongs.indexOfFirst { it.id == song.id }.coerceAtLeast(0)
         playerManager.setPlaylistQueue(allSongs, index)
@@ -99,12 +115,35 @@ class PlaylistViewModel @Inject constructor(
     fun removeSong(songId: String) {
         if (playlistId.isBlank()) return
         viewModelScope.launch {
-            repository.removeSongFromPlaylist(playlistId, songId)
-            _message.value = if (playlist.value?.name == offlinePlaylistName) {
-                "Removed from Offline"
+            // Check via playlist name OR via the song's isDownloaded flag as a fallback.
+            // Avoids relying on playlist.value which may still be null at call time.
+            val isOfflinePlaylist = playlist.value?.name == offlinePlaylistName
+            val song = songs.value.find { it.id == songId }
+            val songIsDownloaded = song?.isDownloaded == true
+            Log.d("PlaylistVM", "removeSong: songId=$songId, playlistName=${playlist.value?.name}, isOfflinePlaylist=$isOfflinePlaylist, songFound=${song != null}, songIsDownloaded=$songIsDownloaded")
+            if (isOfflinePlaylist || songIsDownloaded) {
+                // Clear the downloaded flag so search results no longer show the checkmark,
+                // and delete the local audio file to free storage.
+                song?.filePath?.let { path ->
+                    val deleted = try { java.io.File(path).delete() } catch (_: Exception) { false }
+                    Log.d("PlaylistVM", "Deleted local file: $path, success=$deleted")
+                }
+                // song.id already has the "yt_" prefix (it's the DB id).
+                // Fall back to songId in case song wasn't found in the loaded list.
+                val dbSongId = song?.id ?: songId
+                Log.d("PlaylistVM", "Calling markSongNotDownloaded with dbSongId=$dbSongId")
+                repository.markSongNotDownloaded(dbSongId)
+                // Also clear the in-memory DownloadManager status so the search UI
+                // immediately stops showing the stale COMPLETED checkmark.
+                val rawVideoId = dbSongId.removePrefix("yt_")
+                downloadManager.resetDownloadStatus(rawVideoId)
+                Log.d("PlaylistVM", "markSongNotDownloaded + resetDownloadStatus complete for $dbSongId / $rawVideoId")
             } else {
-                "Removed from playlist"
+                Log.d("PlaylistVM", "Skipping markSongNotDownloaded (not offline playlist and song not downloaded)")
             }
+            repository.removeSongFromPlaylist(playlistId, songId)
+            _message.value = if (isOfflinePlaylist || songIsDownloaded) "Removed from Offline" else "Removed from playlist"
+            Log.d("PlaylistVM", "removeSong complete for $songId")
         }
     }
 

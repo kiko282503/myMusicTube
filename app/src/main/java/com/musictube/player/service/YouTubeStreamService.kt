@@ -12,6 +12,7 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import java.net.URLDecoder
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -22,6 +23,13 @@ import org.schabi.newpipe.extractor.stream.StreamInfo
 @Singleton
 class YouTubeStreamService @Inject constructor() {
 
+    private data class CachedUrl(val url: String, val fetchedAt: Long = System.currentTimeMillis()) {
+        fun isValid(): Boolean = System.currentTimeMillis() - fetchedAt < 5 * 60 * 60 * 1000L // 5 hours
+    }
+
+    // Cache resolved stream URLs so repeat plays are instant and prefetch results are reused
+    private val urlCache = ConcurrentHashMap<String, CachedUrl>()
+
     private val httpClient = OkHttpClient.Builder()
         .connectTimeout(10, TimeUnit.SECONDS)
         .readTimeout(10, TimeUnit.SECONDS)
@@ -29,13 +37,25 @@ class YouTubeStreamService @Inject constructor() {
         .build()
 
     suspend fun extractAudioUrl(videoId: String): String? {
+        urlCache[videoId]?.takeIf { it.isValid() }?.let {
+            Log.d("YT", "Cache hit for $videoId")
+            return it.url
+        }
         Log.d("YT", "Extracting audio for: $videoId (parallel race)")
-        return channelFlow {
+        val result = channelFlow {
             launch(Dispatchers.IO) { fetchWithYouTubeiAndroid(videoId)?.let { send(it) } }
             launch(Dispatchers.IO) { fetchWithNewPipe(videoId)?.let { send(it) } }
             launch(Dispatchers.IO) { fetchWithPiped(videoId)?.let { send(it) } }
             launch(Dispatchers.IO) { fetchWithInvidious(videoId)?.let { send(it) } }
         }.firstOrNull()
+        result?.let { urlCache[videoId] = CachedUrl(it) }
+        return result
+    }
+
+    /** Silently warms the cache for [videoId] without returning the URL. Safe to call in background. */
+    suspend fun prefetchAudioUrl(videoId: String) {
+        if (urlCache[videoId]?.isValid() == true) return
+        extractAudioUrl(videoId)
     }
 
     private fun fetchWithYouTubeiAndroid(videoId: String): String? {

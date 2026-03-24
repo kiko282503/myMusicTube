@@ -11,7 +11,9 @@ import com.musictube.player.service.DownloadManager
 import com.musictube.player.service.DownloadStatus
 import com.musictube.player.service.MusicPlayerManager
 import com.musictube.player.service.SearchService
+import com.musictube.player.service.YouTubeStreamService
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import javax.inject.Inject
@@ -21,7 +23,8 @@ class HomeViewModel @Inject constructor(
     private val musicRepository: MusicRepository,
     private val playerManager: MusicPlayerManager,
     private val searchService: SearchService,
-    private val downloadManager: DownloadManager
+    private val downloadManager: DownloadManager,
+    private val youTubeStreamService: YouTubeStreamService
 ) : ViewModel() {
 
     private val offlinePlaylistName = "Offline Downloads"
@@ -109,6 +112,11 @@ class HomeViewModel @Inject constructor(
     val duration: StateFlow<Long> = playerManager.duration
     val playQueueSize: StateFlow<Int> = playerManager.playQueueSize
 
+    // Preview state for inline play buttons on search result items
+    val previewVideoId: StateFlow<String?> = playerManager.currentVideoId
+    val previewIsPlaying: StateFlow<Boolean> = playerManager.isPlaying
+    val previewIsLoading: StateFlow<Boolean> = playerManager.isLoadingStream
+
     fun pause() = playerManager.pause()
     fun resume() = playerManager.resume()
     fun playNext() = playerManager.playNext()
@@ -151,6 +159,11 @@ class HomeViewModel @Inject constructor(
                     _quickPicks.value = distinct.take(6)
                 }
                 trendingPage = 1
+                // Prefetch audio URLs for the first 20 results so inline play is instant
+                val toWarm = distinct.filter { it.isPlayable }.take(20)
+                launch(Dispatchers.IO) {
+                    toWarm.forEach { youTubeStreamService.prefetchAudioUrl(it.id) }
+                }
             } catch (e: Exception) {
                 Log.e("HomeViewModel", "Failed to load trending songs", e)
             } finally {
@@ -202,13 +215,39 @@ class HomeViewModel @Inject constructor(
     fun playSearchResult(searchResult: SearchResult) {
         if (!searchResult.isPlayable) return
 
-        // All search results are YouTube tracks - use stream extraction
+        // If this song is already playing or loading (e.g. via preview), just navigate
+        // to the player without restarting — let it continue from where it is.
+        val alreadyCurrent = playerManager.currentVideoId.value == searchResult.id
+        val activeStream = playerManager.isPlaying.value || playerManager.isLoadingStream.value
+        if (alreadyCurrent && activeStream) return
+
         playerManager.playYouTubeAudioStream(
             videoId = searchResult.id,
             title = searchResult.title,
             artist = searchResult.artist,
             thumbnailUrl = searchResult.thumbnailUrl
         )
+    }
+
+    /** Play or pause a preview of [searchResult] inline without navigating away. */
+    fun togglePreview(searchResult: SearchResult) {
+        if (!searchResult.isPlayable) return
+        when {
+            playerManager.currentVideoId.value == searchResult.id && playerManager.isPlaying.value -> {
+                playerManager.pause()
+            }
+            playerManager.currentVideoId.value == searchResult.id && !playerManager.isPlaying.value -> {
+                playerManager.resume()
+            }
+            else -> {
+                playerManager.playYouTubeAudioStream(
+                    videoId = searchResult.id,
+                    title = searchResult.title,
+                    artist = searchResult.artist,
+                    thumbnailUrl = searchResult.thumbnailUrl
+                )
+            }
+        }
     }
 
     fun playSong(song: Song) {

@@ -166,6 +166,10 @@ class MusicRepository @Inject constructor(
         refreshPlaylistCount(playlistId)
     }
 
+    suspend fun markSongNotDownloaded(songId: String) {
+        songDao.updateDownloadedStatus(songId, isDownloaded = false, filePath = null)
+    }
+
     suspend fun deletePlaylist(playlistId: String) {
         val playlist = playlistDao.getPlaylistById(playlistId) ?: return
         playlistDao.clearPlaylist(playlistId)

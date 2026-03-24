@@ -197,10 +197,19 @@ class SearchService @Inject constructor() {
                 ?.firstOrNull()?.asJsonObject
                 ?.get("text")?.asString ?: return null
 
-            val artist = renderer.getAsJsonObject("subtitle")
+            // Subtitle runs look like: ["Song", " • ", "Artist"] — skip the type label
+            val subtitleRuns = renderer.getAsJsonObject("subtitle")
                 ?.getAsJsonArray("runs")
-                ?.firstOrNull()?.asJsonObject
-                ?.get("text")?.asString ?: ""
+            val innertubTypeLabels = setOf("song", "single", "ep", "album", "artist",
+                                           "playlist", "podcast", "episode", "video")
+            val artist = subtitleRuns
+                ?.mapNotNull { it?.asJsonObject?.get("text")?.asString }
+                ?.firstOrNull { t ->
+                    val trimmed = t.trim()
+                    trimmed.isNotEmpty()
+                        && trimmed != "•"
+                        && trimmed.lowercase() !in innertubTypeLabels
+                } ?: ""
 
             val thumbnail = renderer.getAsJsonObject("thumbnailRenderer")
                 ?.getAsJsonObject("musicThumbnailRenderer")
@@ -342,13 +351,22 @@ class SearchService @Inject constructor() {
                 ?.get("text")?.asString else null
             if (title == null) return null
 
-            val artist = if (flexCols.size() > 1) flexCols[1]?.asJsonObject
+            // The subtitle column runs look like: ["Song", " • ", "Artist Name", " • ", "Year"]
+            // We must skip the type label ("Song", "Album", etc.) and separators to get the real artist.
+            val typeLabels = setOf("song", "single", "ep", "album", "artist",
+                                   "playlist", "podcast", "episode", "video", "browse")
+            val artistRuns = if (flexCols.size() > 1) flexCols[1]?.asJsonObject
                 ?.getAsJsonObject("musicResponsiveListItemFlexColumnRenderer")
                 ?.getAsJsonObject("text")
-                ?.getAsJsonArray("runs")
-                ?.firstOrNull()?.asJsonObject
-                ?.get("text")?.asString else null
-            val artistName = artist ?: ""
+                ?.getAsJsonArray("runs") else null
+            val artistName = artistRuns
+                ?.mapNotNull { it?.asJsonObject?.get("text")?.asString }
+                ?.firstOrNull { t ->
+                    val trimmed = t.trim()
+                    trimmed.isNotEmpty()
+                        && trimmed != "•"
+                        && trimmed.lowercase() !in typeLabels
+                } ?: ""
 
             val thumbnail = renderer.getAsJsonObject("thumbnail")
                 ?.getAsJsonObject("musicThumbnailRenderer")

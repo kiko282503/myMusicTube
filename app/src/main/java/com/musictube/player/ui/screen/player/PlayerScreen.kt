@@ -23,7 +23,6 @@ import androidx.compose.material.icons.filled.Shuffle
 import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.SkipPrevious
 import androidx.compose.material.icons.filled.Stop
-import androidx.compose.material.icons.filled.VolumeDown
 import androidx.compose.material.icons.filled.VolumeUp
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -90,12 +89,6 @@ fun PlayerScreen(
                     }
                 },
                 actions = {
-                    IconButton(onClick = {
-                        val am = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
-                        am.adjustStreamVolume(AudioManager.STREAM_MUSIC, AudioManager.ADJUST_LOWER, AudioManager.FLAG_SHOW_UI)
-                    }) {
-                        Icon(Icons.Default.VolumeDown, contentDescription = "Volume Down")
-                    }
                     IconButton(onClick = {
                         val am = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
                         am.adjustStreamVolume(AudioManager.STREAM_MUSIC, AudioManager.ADJUST_RAISE, AudioManager.FLAG_SHOW_UI)

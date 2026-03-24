@@ -9,6 +9,7 @@ import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -30,6 +31,7 @@ fun SongItem(
     song: Song,
     onClick: () -> Unit,
     onLikeClick: () -> Unit,
+    isPlaying: Boolean = false,
     modifier: Modifier = Modifier
 ) {
     Card(
@@ -38,7 +40,10 @@ fun SongItem(
             .clickable { onClick() },
         shape = RoundedCornerShape(12.dp),
         colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surface
+            containerColor = if (isPlaying)
+                MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.35f)
+            else
+                MaterialTheme.colorScheme.surface
         )
     ) {
         Row(
@@ -100,22 +105,40 @@ fun SongItem(
             Column(
                 modifier = Modifier.weight(1f)
             ) {
-                Text(
-                    text = song.title,
-                    style = MaterialTheme.typography.bodyLarge,
-                    fontWeight = FontWeight.Medium,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    color = MaterialTheme.colorScheme.onSurface
-                )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    if (isPlaying) {
+                        Icon(
+                            Icons.AutoMirrored.Filled.VolumeUp,
+                            contentDescription = "Now playing",
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(14.dp)
+                        )
+                        Spacer(modifier = Modifier.width(4.dp))
+                    }
+                    Text(
+                        text = song.title,
+                        style = MaterialTheme.typography.bodyLarge,
+                        fontWeight = FontWeight.Medium,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        color = if (isPlaying) MaterialTheme.colorScheme.primary
+                                else MaterialTheme.colorScheme.onSurface
+                    )
+                }
                 
                 Spacer(modifier = Modifier.height(4.dp))
                 
                 Row(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
+                    // Guard against old-data where artist was incorrectly saved as a YouTube type label
+                    val knownTypeLabels = setOf("song", "single", "ep", "album", "artist",
+                                                "playlist", "podcast", "episode", "video")
+                    val displayArtist = song.artist.takeUnless {
+                        it.isBlank() || it.trim().lowercase() in knownTypeLabels
+                    } ?: "Unknown Artist"
                     Text(
-                        text = song.artist,
+                        text = displayArtist,
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
                         maxLines = 1,
