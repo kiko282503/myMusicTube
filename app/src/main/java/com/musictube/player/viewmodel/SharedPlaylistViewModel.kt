@@ -25,10 +25,24 @@ class SharedPlaylistViewModel @Inject constructor(
     private val _isSaved = MutableStateFlow(false)
     val isSaved: StateFlow<Boolean> = _isSaved.asStateFlow()
 
+    // Live playback state so the screen can show which song is active
+    val currentSong: StateFlow<Song?> = playerManager.currentSong
+    val isPlaying: StateFlow<Boolean> = playerManager.isPlaying
+    val currentPosition: StateFlow<Long> = playerManager.currentPosition
+    val duration: StateFlow<Long> = playerManager.duration
+
     fun playNow(songs: List<SharedSongData>) {
         val songObjects = songs.map { it.toSong() }
         playerManager.setPlaylistQueue(songObjects, 0)
     }
+
+    fun playSongAt(songs: List<SharedSongData>, index: Int) {
+        val songObjects = songs.map { it.toSong() }
+        playerManager.setPlaylistQueue(songObjects, index)
+    }
+
+    fun pause() = playerManager.pause()
+    fun resume() = playerManager.resume()
 
     fun saveAsPlaylist(name: String, songs: List<SharedSongData>) {
         viewModelScope.launch {
