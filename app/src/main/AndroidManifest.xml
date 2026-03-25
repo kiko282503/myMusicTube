@@ -36,10 +36,50 @@
         <activity
             android:name=".MainActivity"
             android:exported="true"
+            android:launchMode="singleTop"
             android:theme="@style/Theme.MusicTube">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+            <!-- Deep link: mymusic://playlist?name=...&songs=... (custom scheme) -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="mymusic" android:host="playlist" />
+            </intent-filter>
+            <!-- HTTPS deep link: https://open.mymusic.app/playlist?... -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="https" android:host="open.mymusic.app" android:pathPrefix="/playlist" />
+            </intent-filter>
+            <!-- Receive .musictube playlist file shared from another device (ACTION_VIEW) -->
+            <!-- Registers both the custom MIME type AND the generic octet-stream fallback that
+                 Messenger (and most messaging apps) assign to unknown file extensions. The app
+                 validates the actual file content before processing, so false-matches are ignored. -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="application/x-musictube" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="application/octet-stream" />
+            </intent-filter>
+            <!-- Receive .musictube playlist file via share sheet (ACTION_SEND) -->
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="application/x-musictube" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="application/octet-stream" />
             </intent-filter>
         </activity>
         
@@ -50,6 +90,17 @@
             android:exported="false"
             android:foregroundServiceType="mediaPlayback" />
         
+        <!-- FileProvider: exposes cached .musictube files to other apps for sharing -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
+
         <!-- Media Button Receiver -->
         <receiver 
             android:name="androidx.media.session.MediaButtonReceiver"

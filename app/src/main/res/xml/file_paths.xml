@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<paths>
+    <!-- Temporary .musictube playlist files created for sharing -->
+    <cache-path name="shared_playlists" path="shared_playlists/" />
+</paths>
