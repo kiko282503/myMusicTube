@@ -9,8 +9,10 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.LibraryMusic
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
@@ -62,18 +64,113 @@ fun HomeScreen(
     val previewIsPlaying by viewModel.previewIsPlaying.collectAsState()
     val previewIsLoading by viewModel.previewIsLoading.collectAsState()
 
+    // Rename dialog state
+    var renamingPlaylist by remember { mutableStateOf<com.musictube.player.data.model.Playlist?>(null) }
+    var renameText by remember { mutableStateOf("") }
+    // Delete confirmation state
+    var deletingPlaylist by remember { mutableStateOf<com.musictube.player.data.model.Playlist?>(null) }
+    // Create playlist dialog state
+    var showCreatePlaylistDialog by remember { mutableStateOf(false) }
+    var newPlaylistName by remember { mutableStateOf("") }
+
+    val favoritesName = "Favorites"
+    val offlineDownloadsName = "Offline Downloads"
+
+    // Create playlist dialog
+    if (showCreatePlaylistDialog) {
+        AlertDialog(
+            onDismissRequest = { showCreatePlaylistDialog = false; newPlaylistName = "" },
+            title = { Text("New Playlist") },
+            text = {
+                OutlinedTextField(
+                    value = newPlaylistName,
+                    onValueChange = { newPlaylistName = it },
+                    label = { Text("Playlist name") },
+                    singleLine = true
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        if (newPlaylistName.isNotBlank()) {
+                            viewModel.createPlaylist(newPlaylistName)
+                        }
+                        showCreatePlaylistDialog = false
+                        newPlaylistName = ""
+                    }
+                ) { Text("Create") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showCreatePlaylistDialog = false; newPlaylistName = "" }) { Text("Cancel") }
+            }
+        )
+    }
+
+    // Rename dialog
+    renamingPlaylist?.let { playlist ->
+        AlertDialog(
+            onDismissRequest = { renamingPlaylist = null },
+            title = { Text("Rename Playlist") },
+            text = {
+                OutlinedTextField(
+                    value = renameText,
+                    onValueChange = { renameText = it },
+                    label = { Text("Playlist name") },
+                    singleLine = true
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        if (renameText.isNotBlank()) {
+                            viewModel.renamePlaylist(playlist.id, renameText)
+                        }
+                        renamingPlaylist = null
+                    }
+                ) { Text("Rename") }
+            },
+            dismissButton = {
+                TextButton(onClick = { renamingPlaylist = null }) { Text("Cancel") }
+            }
+        )
+    }
+
+    // Delete confirmation dialog
+    deletingPlaylist?.let { playlist ->
+        AlertDialog(
+            onDismissRequest = { deletingPlaylist = null },
+            title = { Text("Delete Playlist") },
+            text = { Text("Delete \"${playlist.name}\"? This cannot be undone.") },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        viewModel.deletePlaylist(playlist.id)
+                        deletingPlaylist = null
+                    }
+                ) { Text("Delete", color = MaterialTheme.colorScheme.error) }
+            },
+            dismissButton = {
+                TextButton(onClick = { deletingPlaylist = null }) { Text("Cancel") }
+            }
+        )
+    }
+
     val homePlaylists by remember(playlists, offlinePlaylistId) {
         derivedStateOf {
             val offline = playlists.firstOrNull { it.id == offlinePlaylistId }
-            val userPlaylists = playlists
+            val favorites = playlists.firstOrNull {
+                it.id != offlinePlaylistId && it.name.equals("Favorites", ignoreCase = true)
+            }
+            val rest = playlists
                 .asSequence()
-                .filter { it.id != offlinePlaylistId }
+                .filter { it.id != offlinePlaylistId && !it.name.equals("Favorites", ignoreCase = true) }
                 .sortedByDescending { it.dateCreated }
                 .toList()
 
             buildList {
                 if (offline != null) add(offline)
-                addAll(userPlaylists)
+                if (favorites != null) add(favorites)
+                addAll(rest)
             }
         }
     }
@@ -97,7 +194,7 @@ fun HomeScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("MusicTube", fontWeight = FontWeight.Bold) },
+                title = { Text("My Music Player", fontWeight = FontWeight.Bold) },
                 actions = {
                     IconButton(onClick = onNavigateToSearch) {
                         Icon(Icons.Default.Search, contentDescription = "Search")
@@ -208,12 +305,28 @@ fun HomeScreen(
                                 .fillMaxWidth()
                                 .padding(top = 12.dp)
                         ) {
-                            Text(
-                                text = "Playlist",
-                                style = MaterialTheme.typography.titleLarge,
-                                fontWeight = FontWeight.Bold,
-                                modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
-                            )
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 16.dp, vertical = 8.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Text(
+                                    text = "Playlist",
+                                    style = MaterialTheme.typography.titleLarge,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                TextButton(onClick = { showCreatePlaylistDialog = true }) {
+                                    Icon(
+                                        imageVector = Icons.Default.Add,
+                                        contentDescription = "New Playlist",
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text("New Playlist")
+                                }
+                            }
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
@@ -270,11 +383,19 @@ fun HomeScreen(
                                     }
                                 } else {
                                     homePlaylists.forEach { playlist ->
+                                        val isSystem = playlist.id == offlinePlaylistId ||
+                                            playlist.name.equals(favoritesName, ignoreCase = true)
                                         HomePlaylistCard(
                                             playlist = playlist,
                                             isOfflinePlaylist = playlist.id == offlinePlaylistId,
                                             offlineSongCount = offlineSongCount,
-                                            onClick = { onNavigateToPlaylist(playlist.id) }
+                                            isSystemPlaylist = isSystem,
+                                            onClick = { onNavigateToPlaylist(playlist.id) },
+                                            onRename = {
+                                                renameText = playlist.name
+                                                renamingPlaylist = playlist
+                                            },
+                                            onDelete = { deletingPlaylist = playlist }
                                         )
                                     }
                                 }
@@ -519,8 +640,12 @@ private fun HomePlaylistCard(
     playlist: Playlist,
     isOfflinePlaylist: Boolean,
     offlineSongCount: Int,
-    onClick: () -> Unit
+    isSystemPlaylist: Boolean,
+    onClick: () -> Unit,
+    onRename: () -> Unit = {},
+    onDelete: () -> Unit = {}
 ) {
+    var menuExpanded by remember { mutableStateOf(false) }
     Card(
         modifier = Modifier
             .width(112.dp)
@@ -607,6 +732,43 @@ private fun HomePlaylistCard(
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
+
+            if (!isSystemPlaylist) {
+                Box(modifier = Modifier.fillMaxWidth()) {
+                    IconButton(
+                        onClick = { menuExpanded = true },
+                        modifier = Modifier
+                            .size(28.dp)
+                            .align(Alignment.CenterEnd)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.MoreVert,
+                            contentDescription = "Playlist options",
+                            modifier = Modifier.size(18.dp),
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    DropdownMenu(
+                        expanded = menuExpanded,
+                        onDismissRequest = { menuExpanded = false }
+                    ) {
+                        DropdownMenuItem(
+                            text = { Text("Rename") },
+                            onClick = {
+                                menuExpanded = false
+                                onRename()
+                            }
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Delete", color = MaterialTheme.colorScheme.error) },
+                            onClick = {
+                                menuExpanded = false
+                                onDelete()
+                            }
+                        )
+                    }
+                }
+            }
         }
     }
 }

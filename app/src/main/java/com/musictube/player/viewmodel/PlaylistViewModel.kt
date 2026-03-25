@@ -220,6 +220,34 @@ class PlaylistViewModel @Inject constructor(
         _message.value = null
     }
 
+    fun removeSelectedSongs(songIds: Set<String>) {
+        songIds.forEach { removeSong(it) }
+    }
+
+    fun addSelectedSongsToPlaylist(songIds: Set<String>, targetPlaylistId: String) {
+        viewModelScope.launch {
+            var added = 0
+            songIds.forEach { sid ->
+                val ok = repository.addExistingSongToPlaylist(targetPlaylistId, sid)
+                if (ok) added++
+            }
+            _message.value = if (added > 0) "Added $added song(s) to playlist" else "Songs already in that playlist"
+        }
+    }
+
+    fun createPlaylistAndAddSelected(songIds: Set<String>, name: String) {
+        viewModelScope.launch {
+            val trimmed = name.trim()
+            if (trimmed.isBlank()) { _message.value = "Playlist name is required"; return@launch }
+            val existing = allPlaylists.value.firstOrNull { it.name.equals(trimmed, ignoreCase = true) }
+            if (existing != null) { _message.value = "Playlist already exists"; return@launch }
+            val newPlaylistId = repository.createPlaylist(trimmed)
+            var added = 0
+            songIds.forEach { sid -> if (repository.addExistingSongToPlaylist(newPlaylistId, sid)) added++ }
+            _message.value = if (added > 0) "Added $added song(s) to \"$trimmed\"" else "Could not add songs"
+        }
+    }
+
     fun downloadSong(song: Song) {
         if (playlistId.isBlank() || song.isDownloaded) return
 

@@ -36,7 +36,10 @@ import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -103,6 +106,16 @@ fun PlaylistScreen(
     var newPlaylistName by remember { mutableStateOf("") }
 
     var showSongActionsSheet by remember { mutableStateOf(false) }
+    var navigatingBack by remember { mutableStateOf(false) }
+
+    // Multi-select state (only used on Offline Downloads)
+    val isOfflinePlaylist = playlist?.name == "Offline Downloads"
+    var isSelectMode by remember { mutableStateOf(false) }
+    var selectedIds by remember { mutableStateOf(emptySet<String>()) }
+    var showBulkAddToPlaylistDialog by remember { mutableStateOf(false) }
+    var showBulkCreatePlaylistDialog by remember { mutableStateOf(false) }
+    var bulkNewPlaylistName by remember { mutableStateOf("") }
+    var showBulkMenu by remember { mutableStateOf(false) }
 
     LaunchedEffect(message) {
         val text = message ?: return@LaunchedEffect
@@ -116,8 +129,45 @@ fun PlaylistScreen(
             TopAppBar(
                 title = { Text(playlist?.name ?: "Playlist") },
                 navigationIcon = {
-                    IconButton(onClick = onNavigateBack) {
+                    IconButton(onClick = {
+                        if (!navigatingBack) { navigatingBack = true; onNavigateBack() }
+                    }) {
                         Icon(Icons.Default.ArrowBack, contentDescription = "Back")
+                    }
+                },
+                actions = {
+                    if (isOfflinePlaylist && isSelectMode) {
+                        Text(
+                            "${selectedIds.size} selected",
+                            style = MaterialTheme.typography.bodyMedium,
+                            modifier = Modifier.padding(end = 4.dp)
+                        )
+                        Box {
+                            IconButton(onClick = { showBulkMenu = true }) {
+                                Icon(Icons.Default.MoreVert, contentDescription = "Options")
+                            }
+                            DropdownMenu(
+                                expanded = showBulkMenu,
+                                onDismissRequest = { showBulkMenu = false }
+                            ) {
+                                DropdownMenuItem(
+                                    text = { Text("Add to Playlist") },
+                                    onClick = {
+                                        showBulkMenu = false
+                                        showBulkAddToPlaylistDialog = true
+                                    }
+                                )
+                                DropdownMenuItem(
+                                    text = { Text("Remove from Offline Downloads") },
+                                    onClick = {
+                                        showBulkMenu = false
+                                        viewModel.removeSelectedSongs(selectedIds)
+                                        selectedIds = emptySet()
+                                        isSelectMode = false
+                                    }
+                                )
+                            }
+                        }
                     }
                 }
             )
@@ -303,9 +353,28 @@ fun PlaylistScreen(
                                 isPlaying = song.id == playingSongId && isPlayingNow,
                                 downloadStatus = downloadStatus[song.id] ?: DownloadStatus.IDLE,
                                 downloadProgress = downloadProgress[song.id] ?: 0,
+                                isSelectMode = isSelectMode,
+                                isSelected = selectedIds.contains(song.id),
+                                onCheckedChange = { checked ->
+                                    selectedIds = if (checked) selectedIds + song.id
+                                    else selectedIds - song.id
+                                    if (selectedIds.isEmpty()) isSelectMode = false
+                                },
+                                onLongPress = {
+                                    if (isOfflinePlaylist) {
+                                        isSelectMode = true
+                                        selectedIds = selectedIds + song.id
+                                    }
+                                },
                                 onPlay = {
-                                    viewModel.playSong(song)
-                                    onNavigateToPlayer()
+                                    if (isSelectMode) {
+                                        selectedIds = if (selectedIds.contains(song.id))
+                                            selectedIds - song.id else selectedIds + song.id
+                                        if (selectedIds.isEmpty()) isSelectMode = false
+                                    } else {
+                                        viewModel.playSong(song)
+                                        onNavigateToPlayer()
+                                    }
                                 },
                                 onLikeClick = {
                                     viewModel.setLiked(song, !song.isLiked)
@@ -318,9 +387,107 @@ fun PlaylistScreen(
                             )
                         }
                     }
+
                 }
             }
         }
+    }
+
+    // Bulk add to playlist dialog
+    if (showBulkAddToPlaylistDialog) {
+        AlertDialog(
+            onDismissRequest = { showBulkAddToPlaylistDialog = false },
+            title = { Text("Add ${selectedIds.size} song(s) to Playlist") },
+            text = {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    TextButton(
+                        onClick = {
+                            showBulkAddToPlaylistDialog = false
+                            showBulkCreatePlaylistDialog = true
+                        },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(Icons.Default.LibraryMusic, contentDescription = null)
+                            Text("+ New Playlist", style = MaterialTheme.typography.bodyLarge)
+                        }
+                    }
+                    allPlaylists
+                        .filter { !it.name.equals("Offline Downloads", ignoreCase = true) }
+                        .forEach { pl ->
+                            TextButton(
+                                onClick = {
+                                    val ids = selectedIds
+                                    viewModel.addSelectedSongsToPlaylist(ids, pl.id)
+                                    selectedIds = emptySet()
+                                    isSelectMode = false
+                                    showBulkAddToPlaylistDialog = false
+                                },
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Column(modifier = Modifier.fillMaxWidth()) {
+                                    Text(text = pl.name, style = MaterialTheme.typography.bodyLarge)
+                                    Text(
+                                        text = "${pl.songCount} songs",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                            }
+                        }
+                }
+            },
+            confirmButton = {},
+            dismissButton = {
+                TextButton(onClick = { showBulkAddToPlaylistDialog = false }) { Text("Cancel") }
+            }
+        )
+    }
+
+    // Bulk create new playlist dialog
+    if (showBulkCreatePlaylistDialog) {
+        val pendingIds = selectedIds
+        AlertDialog(
+            onDismissRequest = {
+                showBulkCreatePlaylistDialog = false
+                bulkNewPlaylistName = ""
+            },
+            title = { Text("New Playlist") },
+            text = {
+                OutlinedTextField(
+                    value = bulkNewPlaylistName,
+                    onValueChange = { bulkNewPlaylistName = it },
+                    label = { Text("Playlist name") },
+                    singleLine = true
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        viewModel.createPlaylistAndAddSelected(pendingIds, bulkNewPlaylistName)
+                        selectedIds = emptySet()
+                        isSelectMode = false
+                        showBulkCreatePlaylistDialog = false
+                        bulkNewPlaylistName = ""
+                    }
+                ) { Text("Create") }
+            },
+            dismissButton = {
+                TextButton(onClick = {
+                    showBulkCreatePlaylistDialog = false
+                    bulkNewPlaylistName = ""
+                }) { Text("Cancel") }
+            }
+        )
     }
 
     // Song actions bottom sheet
@@ -470,6 +637,10 @@ private fun PlaylistSongRow(
     isPlaying: Boolean,
     downloadStatus: DownloadStatus,
     downloadProgress: Int,
+    isSelectMode: Boolean = false,
+    isSelected: Boolean = false,
+    onCheckedChange: (Boolean) -> Unit = {},
+    onLongPress: () -> Unit = {},
     onPlay: () -> Unit,
     onLikeClick: () -> Unit,
     onOpenMenu: () -> Unit,
@@ -479,14 +650,23 @@ private fun PlaylistSongRow(
         modifier = Modifier.fillMaxWidth(),
         verticalAlignment = Alignment.CenterVertically
     ) {
+        if (isSelectMode) {
+            Checkbox(
+                checked = isSelected,
+                onCheckedChange = onCheckedChange,
+                modifier = Modifier.size(40.dp)
+            )
+        }
         SongItem(
             song = song,
             isPlaying = isPlaying,
             onClick = onPlay,
             onLikeClick = onLikeClick,
+            onLongPress = onLongPress,
             modifier = Modifier.weight(1f)
         )
 
+        if (!isSelectMode) {
         Spacer(modifier = Modifier.width(8.dp))
 
         Column(
@@ -524,6 +704,7 @@ private fun PlaylistSongRow(
                 }
             }
         }
+        } // end if (!isSelectMode)
     }
 }
 

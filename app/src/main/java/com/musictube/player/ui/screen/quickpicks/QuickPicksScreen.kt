@@ -51,12 +51,16 @@ fun QuickPicksScreen(
         }
     }
 
+    var navigatingBack by remember { mutableStateOf(false) }
+
     Scaffold(
         topBar = {
             TopAppBar(
                 title = { Text("Quick picks", fontWeight = FontWeight.Bold) },
                 navigationIcon = {
-                    IconButton(onClick = onNavigateBack) {
+                    IconButton(onClick = {
+                        if (!navigatingBack) { navigatingBack = true; onNavigateBack() }
+                    }) {
                         Icon(Icons.Default.ArrowBack, contentDescription = "Back")
                     }
                 }

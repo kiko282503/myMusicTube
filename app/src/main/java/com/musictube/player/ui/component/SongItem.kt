@@ -1,6 +1,7 @@
 package com.musictube.player.ui.component
 
-import androidx.compose.foundation.clickable
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -26,18 +27,20 @@ import coil.request.ImageRequest
 import com.musictube.player.data.model.Song
 import java.util.concurrent.TimeUnit
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun SongItem(
     song: Song,
     onClick: () -> Unit,
     onLikeClick: () -> Unit,
+    onLongPress: (() -> Unit)? = null,
     isPlaying: Boolean = false,
     modifier: Modifier = Modifier
 ) {
     Card(
         modifier = modifier
             .fillMaxWidth()
-            .clickable { onClick() },
+            .combinedClickable(onClick = onClick, onLongClick = onLongPress),
         shape = RoundedCornerShape(12.dp),
         colors = CardDefaults.cardColors(
             containerColor = if (isPlaying)
@@ -56,8 +59,7 @@ fun SongItem(
             Box(
                 modifier = Modifier
                     .size(56.dp)
-                    .clip(RoundedCornerShape(8.dp))
-                    .clickable { onClick() },
+                    .clip(RoundedCornerShape(8.dp)),
                 contentAlignment = Alignment.Center
             ) {
                 SubcomposeAsyncImage(

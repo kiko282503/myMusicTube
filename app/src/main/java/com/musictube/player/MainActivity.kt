@@ -137,61 +137,13 @@ fun MusicTubeApp(
         }
     }
 
-    Box(modifier = androidx.compose.ui.Modifier.fillMaxSize()) {
-        NavHost(
-            navController = navController,
-            startDestination = "home"
-        ) {
-        composable("home") {
-            HomeScreen(
-                onNavigateToPlayer = { navController.navigate("player") },
-                onNavigateToSearch = { navController.navigate("search") },
-                onNavigateToQuickPicks = { navController.navigate("quick_picks") },
-                onNavigateToPlaylist = { playlistId -> navController.navigate("playlist/$playlistId") }
-            )
-        }
-        
-        composable("player") {
-            PlayerScreen(
-                onNavigateBack = { navController.popBackStack() }
-            )
-        }
-        
-        composable("search") {
-            SearchScreen(
-                onNavigateBack = { navController.popBackStack() },
-                onNavigateToPlayer = { navController.navigate("player") }
-            )
-        }
-
-        composable("quick_picks") {
-            QuickPicksScreen(
-                onNavigateBack = { navController.popBackStack() },
-                onNavigateToPlayer = { navController.navigate("player") }
-            )
-        }
-
-        composable("playlist/{playlistId}") {
-            PlaylistScreen(
-                onNavigateBack = { navController.popBackStack() },
-                onNavigateToPlayer = { navController.navigate("player") }
-            )
-        }
-
-        composable("downloads") {
-            DownloadsScreen(
-                onNavigateBack = { navController.popBackStack() }
-            )
-        }
-    }
-
+    Column(modifier = androidx.compose.ui.Modifier.fillMaxSize()) {
         // Global download progress banner — hidden on the downloads screen itself
         if (activeDownloadCount > 0 && currentRoute != "downloads") {
             Surface(
                 color = MaterialTheme.colorScheme.primaryContainer,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .align(Alignment.TopCenter)
                     .clickable {
                         navController.navigate("downloads") { launchSingleTop = true }
                     }
@@ -224,7 +176,55 @@ fun MusicTubeApp(
                 }
             }
         }
-    } // end Box
+
+        NavHost(
+            navController = navController,
+            startDestination = "home",
+            modifier = Modifier.weight(1f)
+        ) {
+        composable("home") {
+            HomeScreen(
+                onNavigateToPlayer = { navController.navigate("player") { launchSingleTop = true } },
+                onNavigateToSearch = { navController.navigate("search") { launchSingleTop = true } },
+                onNavigateToQuickPicks = { navController.navigate("quick_picks") { launchSingleTop = true } },
+                onNavigateToPlaylist = { playlistId -> navController.navigate("playlist/$playlistId") { launchSingleTop = true } }
+            )
+        }
+        
+        composable("player") {
+            PlayerScreen(
+                onNavigateBack = { navController.popBackStack() }
+            )
+        }
+        
+        composable("search") {
+            SearchScreen(
+                onNavigateBack = { navController.popBackStack() },
+                onNavigateToPlayer = { navController.navigate("player") { launchSingleTop = true } }
+            )
+        }
+
+        composable("quick_picks") {
+            QuickPicksScreen(
+                onNavigateBack = { navController.popBackStack() },
+                onNavigateToPlayer = { navController.navigate("player") { launchSingleTop = true } }
+            )
+        }
+
+        composable("playlist/{playlistId}") {
+            PlaylistScreen(
+                onNavigateBack = { navController.popBackStack() },
+                onNavigateToPlayer = { navController.navigate("player") { launchSingleTop = true } }
+            )
+        }
+
+        composable("downloads") {
+            DownloadsScreen(
+                onNavigateBack = { navController.popBackStack() }
+            )
+        }
+    }
+    } // end Column
 }
 
 @Preview(showBackground = true)

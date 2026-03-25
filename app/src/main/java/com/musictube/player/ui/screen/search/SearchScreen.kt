@@ -75,14 +75,19 @@ fun SearchScreen(
         }
     }
     
+    var navigatingBack by remember { mutableStateOf(false) }
+
     Scaffold(
         topBar = {
             TopAppBar(
                 title = { Text("Search Music") },
                 navigationIcon = {
                     IconButton(onClick = {
-                        viewModel.clearSearch()
-                        onNavigateBack()
+                        if (!navigatingBack) {
+                            navigatingBack = true
+                            viewModel.clearSearch()
+                            onNavigateBack()
+                        }
                     }) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
                     }

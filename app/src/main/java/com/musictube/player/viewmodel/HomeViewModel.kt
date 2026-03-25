@@ -121,6 +121,24 @@ class HomeViewModel @Inject constructor(
     fun resume() = playerManager.resume()
     fun playNext() = playerManager.playNext()
 
+    fun renamePlaylist(playlistId: String, newName: String) {
+        viewModelScope.launch {
+            musicRepository.renamePlaylist(playlistId, newName.trim())
+        }
+    }
+
+    fun deletePlaylist(playlistId: String) {
+        viewModelScope.launch {
+            musicRepository.deletePlaylist(playlistId)
+        }
+    }
+
+    fun createPlaylist(name: String) {
+        viewModelScope.launch {
+            musicRepository.createPlaylist(name.trim())
+        }
+    }
+
     init {
         ensureOfflinePlaylist()
         loadTrendingSongs() // quickPicks are derived inside after results arrive

@@ -71,6 +71,7 @@ fun PlayerScreen(
     var showPlaylistDialog by remember { mutableStateOf(false) }
     var showCreatePlaylistDialog by remember { mutableStateOf(false) }
     var newPlaylistName by remember { mutableStateOf("") }
+    var navigatingBack by remember { mutableStateOf(false) }
 
     // Ensure the WebView is created (and permanently attached to the Activity content view)
     // whenever a YouTube song is active. No need to host it in Compose — GONE visibility
@@ -83,7 +84,7 @@ fun PlayerScreen(
                 title = { Text("Now Playing") },
                 navigationIcon = {
                     IconButton(onClick = {
-                        onNavigateBack()
+                        if (!navigatingBack) { navigatingBack = true; onNavigateBack() }
                     }) {
                         Icon(Icons.Default.ArrowBack, contentDescription = "Back")
                     }

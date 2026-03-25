@@ -176,6 +176,11 @@ class MusicRepository @Inject constructor(
         playlistDao.deletePlaylist(playlist)
     }
 
+    suspend fun renamePlaylist(playlistId: String, newName: String) {
+        val playlist = playlistDao.getPlaylistById(playlistId) ?: return
+        playlistDao.updatePlaylist(playlist.copy(name = newName))
+    }
+
     private suspend fun refreshPlaylistCount(playlistId: String) {
         val count = playlistDao.getPlaylistSongCount(playlistId)
         playlistDao.updatePlaylistSongCount(playlistId, count)
