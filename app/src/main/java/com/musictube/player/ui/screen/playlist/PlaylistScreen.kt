@@ -19,8 +19,14 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
+import android.content.Intent
+import android.net.Uri
+import android.util.Base64
+import androidx.core.content.FileProvider
+import java.io.File
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.LibraryMusic
@@ -61,6 +67,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -97,6 +104,7 @@ fun PlaylistScreen(
     val miniPlayerQueueSize by viewModel.playQueueSize.collectAsState()
     // A song from this playlist is the active one when its id matches currentSong
     val playingSongId = currentSong?.id
+    val context = LocalContext.current
     val snackbarHostState = remember { SnackbarHostState() }
     var selectedSong by remember { mutableStateOf<Song?>(null) }
     // Captured before the action sheet closes so it survives onDismissRequest nulling selectedSong
@@ -136,6 +144,50 @@ fun PlaylistScreen(
                     }
                 },
                 actions = {
+                    if (!isSelectMode && songs.isNotEmpty()) {
+                        IconButton(onClick = {
+                            val playlistName = playlist?.name ?: "Playlist"
+                            // Build a .musictube JSON file so the share shows as a tappable
+                            // file attachment in Messenger/WhatsApp — custom URI schemes like
+                            // mymusic:// are plain unclickable text in most messaging apps.
+                            val sb = StringBuilder()
+                            sb.append("{\"version\":1,\"name\":")
+                            sb.append(org.json.JSONObject.quote(playlistName))
+                            sb.append(",\"songs\":[")
+                            songs.forEachIndexed { i, song ->
+                                if (i > 0) sb.append(",")
+                                val videoId = song.id.removePrefix("yt_").removePrefix("dl_")
+                                sb.append("{\"id\":")
+                                sb.append(org.json.JSONObject.quote(videoId))
+                                sb.append(",\"title\":")
+                                sb.append(org.json.JSONObject.quote(song.title))
+                                sb.append(",\"artist\":")
+                                sb.append(org.json.JSONObject.quote(song.artist))
+                                sb.append("}")
+                            }
+                            sb.append("]}")
+                            val safeFileName = playlistName.replace("[^a-zA-Z0-9_\\-]".toRegex(), "_")
+                            val dir = File(context.cacheDir, "shared_playlists").also { it.mkdirs() }
+                            val file = File(dir, "$safeFileName.musictube")
+                            file.writeText(sb.toString())
+                            val fileUri: Uri = FileProvider.getUriForFile(
+                                context, "${context.packageName}.fileprovider", file
+                            )
+                            val songLines = songs.take(5).joinToString("\n") { "  \u2022 ${it.title}" } +
+                                if (songs.size > 5) "\n  \u2026 +${songs.size - 5} more" else ""
+                            val shareText = "\uD83C\uDFB5 $playlistName (${songs.size} song(s))\n$songLines\n\n\uD83D\uDCF2 Tap the .musictube file below to open in MusicTube.\n\u2139\uFE0F Don't have MusicTube? Ask the sender to share the app first."
+                            val intent = Intent(Intent.ACTION_SEND).apply {
+                                type = "application/x-musictube"
+                                putExtra(Intent.EXTRA_SUBJECT, playlistName)
+                                putExtra(Intent.EXTRA_TEXT, shareText)
+                                putExtra(Intent.EXTRA_STREAM, fileUri)
+                                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                            }
+                            context.startActivity(Intent.createChooser(intent, "Share playlist"))
+                        }) {
+                            Icon(Icons.Default.Share, contentDescription = "Share playlist")
+                        }
+                    }
                     if (isOfflinePlaylist && isSelectMode) {
                         Text(
                             "${selectedIds.size} selected",
