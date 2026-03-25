@@ -39,6 +39,9 @@ interface SongDao {
     @Query("UPDATE songs SET isLiked = :isLiked WHERE id = :songId")
     suspend fun updateLikedStatus(songId: String, isLiked: Boolean)
 
+    @Query("UPDATE songs SET isDownloaded = :isDownloaded, filePath = :filePath WHERE id = :songId")
+    suspend fun updateDownloadedStatus(songId: String, isDownloaded: Boolean, filePath: String?)
+
     @Query("SELECT * FROM songs WHERE isDownloaded = 1")
     fun getDownloadedSongs(): Flow<List<Song>>
 }

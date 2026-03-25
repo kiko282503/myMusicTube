@@ -1,30 +1,20 @@
 package com.musictube.player.viewmodel
 
 import androidx.lifecycle.ViewModel
-import androidx.lifecycle.viewModelScope
-import com.musictube.player.data.repository.MusicRepository
+import com.musictube.player.data.model.SearchResult
 import com.musictube.player.service.DownloadManager
 import com.musictube.player.service.DownloadStatus
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.launch
 import javax.inject.Inject
 
 @HiltViewModel
-class MainViewModel @Inject constructor(
-    private val musicRepository: MusicRepository,
+class DownloadsViewModel @Inject constructor(
     private val downloadManager: DownloadManager
 ) : ViewModel() {
 
+    val downloadQueue: StateFlow<Map<String, SearchResult>> = downloadManager.downloadQueue
     val downloadStatus: StateFlow<Map<String, DownloadStatus>> = downloadManager.downloadStatus
-
-    init {
-        // Initialize any global app state here
-    }
-    
-    fun scanForLocalMusic() {
-        viewModelScope.launch {
-            musicRepository.scanLocalMusic()
-        }
-    }
+    val downloadProgress: StateFlow<Map<String, Int>> = downloadManager.downloadProgress
+    val downloadErrors: StateFlow<Map<String, String>> = downloadManager.downloadErrors
 }

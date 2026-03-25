@@ -6,6 +6,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.ErrorOutline
+import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material3.*
@@ -16,7 +17,10 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import coil.compose.AsyncImage
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
+import coil.compose.SubcomposeAsyncImage
+import coil.request.ImageRequest
 import com.musictube.player.data.model.SearchResult
 import com.musictube.player.service.DownloadStatus
 
@@ -25,7 +29,11 @@ fun SearchResultItem(
     searchResult: SearchResult,
     downloadStatus: DownloadStatus,
     downloadProgress: Int = 0,
+    downloadError: String? = null,
+    isPreviewPlaying: Boolean = false,
+    isPreviewLoading: Boolean = false,
     onDownload: () -> Unit,
+    onPreviewPlay: () -> Unit,
     onPlay: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -51,26 +59,45 @@ fun SearchResultItem(
                     .clip(RoundedCornerShape(8.dp)),
                 contentAlignment = Alignment.Center
             ) {
-                if (searchResult.thumbnailUrl.isNotEmpty()) {
-                    AsyncImage(
-                        model = searchResult.thumbnailUrl,
-                        contentDescription = "Thumbnail",
-                        modifier = Modifier.fillMaxSize()
-                    )
-                } else {
-                    Surface(
-                        modifier = Modifier.fillMaxSize(),
-                        color = MaterialTheme.colorScheme.primaryContainer,
-                        shape = RoundedCornerShape(8.dp)
-                    ) {
-                        Icon(
-                            Icons.Default.PlayArrow,
-                            contentDescription = "Play",
-                            modifier = Modifier.padding(16.dp),
-                            tint = MaterialTheme.colorScheme.onPrimaryContainer
-                        )
+                SubcomposeAsyncImage(
+                    model = ImageRequest.Builder(LocalContext.current)
+                        .data(searchResult.thumbnailUrl.ifEmpty { null })
+                        .crossfade(200)
+                        .build(),
+                    contentDescription = "Thumbnail",
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.fillMaxSize(),
+                    loading = {
+                        Surface(
+                            modifier = Modifier.fillMaxSize(),
+                            color = MaterialTheme.colorScheme.primaryContainer,
+                            shape = RoundedCornerShape(8.dp)
+                        ) {
+                            Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(20.dp),
+                                    strokeWidth = 2.dp
+                                )
+                            }
+                        }
+                    },
+                    error = {
+                        Surface(
+                            modifier = Modifier.fillMaxSize(),
+                            color = MaterialTheme.colorScheme.primaryContainer,
+                            shape = RoundedCornerShape(8.dp)
+                        ) {
+                            Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
+                                Icon(
+                                    Icons.Default.PlayArrow,
+                                    contentDescription = null,
+                                    modifier = Modifier.padding(14.dp),
+                                    tint = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.5f)
+                                )
+                            }
+                        }
                     }
-                }
+                )
             }
             
             Spacer(modifier = Modifier.width(16.dp))
@@ -123,8 +150,52 @@ fun SearchResultItem(
                 }
             }
             
-            Spacer(modifier = Modifier.width(8.dp))
-            
+            Spacer(modifier = Modifier.width(4.dp))
+
+            // Inline preview play/pause button
+            if (searchResult.isPlayable) {
+                when {
+                    isPreviewLoading -> {
+                        Box(
+                            modifier = Modifier.size(36.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(20.dp),
+                                strokeWidth = 2.dp,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                        }
+                    }
+                    isPreviewPlaying -> {
+                        IconButton(
+                            onClick = onPreviewPlay,
+                            modifier = Modifier.size(36.dp)
+                        ) {
+                            Icon(
+                                Icons.Default.Pause,
+                                contentDescription = "Pause preview",
+                                tint = MaterialTheme.colorScheme.primary
+                            )
+                        }
+                    }
+                    else -> {
+                        IconButton(
+                            onClick = onPreviewPlay,
+                            modifier = Modifier.size(36.dp)
+                        ) {
+                            Icon(
+                                Icons.Default.PlayArrow,
+                                contentDescription = "Play preview",
+                                tint = MaterialTheme.colorScheme.primary
+                            )
+                        }
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.width(4.dp))
+
             // Download action
             if (searchResult.isPlayable) {
                 when (downloadStatus) {
@@ -160,15 +231,27 @@ fun SearchResultItem(
                         )
                     }
                     DownloadStatus.FAILED -> {
-                        IconButton(
-                            onClick = onDownload,
-                            modifier = Modifier.size(36.dp)
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally
                         ) {
-                            Icon(
-                                Icons.Default.ErrorOutline,
-                                contentDescription = "Retry download",
-                                tint = MaterialTheme.colorScheme.error
-                            )
+                            IconButton(
+                                onClick = onDownload,
+                                modifier = Modifier.size(36.dp)
+                            ) {
+                                Icon(
+                                    Icons.Default.ErrorOutline,
+                                    contentDescription = "Retry download",
+                                    tint = MaterialTheme.colorScheme.error
+                                )
+                            }
+                            if (downloadError != null && downloadError.contains("rate", ignoreCase = true)) {
+                                Text(
+                                    text = "Rate limited",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.error,
+                                    maxLines = 1
+                                )
+                            }
                         }
                     }
                 }

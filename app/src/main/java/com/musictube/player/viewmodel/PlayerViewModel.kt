@@ -30,6 +30,7 @@ class PlayerViewModel @Inject constructor(
     val currentSong: StateFlow<Song?> = playerManager.currentSong
     val currentVideoId: StateFlow<String?> = playerManager.currentVideoId
     val isPlaying: StateFlow<Boolean> = playerManager.isPlaying
+    val isLoadingStream: StateFlow<Boolean> = playerManager.isLoadingStream
     val currentPosition: StateFlow<Long> = playerManager.currentPosition
     val duration: StateFlow<Long> = playerManager.duration
     val volume: StateFlow<Float> = playerManager.volume

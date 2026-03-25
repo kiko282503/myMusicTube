@@ -1,8 +1,15 @@
 ﻿package com.musictube.player.ui.screen.player
 
+import coil.compose.AsyncImage
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.draw.clip
 import android.content.Context
 import android.media.AudioManager
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
@@ -16,7 +23,6 @@ import androidx.compose.material.icons.filled.Shuffle
 import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.SkipPrevious
 import androidx.compose.material.icons.filled.Stop
-import androidx.compose.material.icons.filled.VolumeDown
 import androidx.compose.material.icons.filled.VolumeUp
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -48,6 +54,7 @@ fun PlayerScreen(
     val currentSong by viewModel.currentSong.collectAsState()
     val currentVideoId by viewModel.currentVideoId.collectAsState()
     val isPlaying by viewModel.isPlaying.collectAsState()
+    val isLoadingStream by viewModel.isLoadingStream.collectAsState()
     val currentPosition by viewModel.currentPosition.collectAsState()
     val duration by viewModel.duration.collectAsState()
     val downloadStatus by viewModel.currentDownloadStatus.collectAsState()
@@ -62,7 +69,9 @@ fun PlayerScreen(
     val context = LocalContext.current
     
     var showPlaylistDialog by remember { mutableStateOf(false) }
+    var showCreatePlaylistDialog by remember { mutableStateOf(false) }
     var newPlaylistName by remember { mutableStateOf("") }
+    var navigatingBack by remember { mutableStateOf(false) }
 
     // Ensure the WebView is created (and permanently attached to the Activity content view)
     // whenever a YouTube song is active. No need to host it in Compose — GONE visibility
@@ -75,18 +84,12 @@ fun PlayerScreen(
                 title = { Text("Now Playing") },
                 navigationIcon = {
                     IconButton(onClick = {
-                        onNavigateBack()
+                        if (!navigatingBack) { navigatingBack = true; onNavigateBack() }
                     }) {
                         Icon(Icons.Default.ArrowBack, contentDescription = "Back")
                     }
                 },
                 actions = {
-                    IconButton(onClick = {
-                        val am = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
-                        am.adjustStreamVolume(AudioManager.STREAM_MUSIC, AudioManager.ADJUST_LOWER, AudioManager.FLAG_SHOW_UI)
-                    }) {
-                        Icon(Icons.Default.VolumeDown, contentDescription = "Volume Down")
-                    }
                     IconButton(onClick = {
                         val am = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
                         am.adjustStreamVolume(AudioManager.STREAM_MUSIC, AudioManager.ADJUST_RAISE, AudioManager.FLAG_SHOW_UI)
@@ -136,12 +139,14 @@ fun PlayerScreen(
                     // Show playback status and progress
                     Text(
                         text = when {
+                            isLoadingStream -> "Loading..."
                             isPlaying -> "Playing"
                             currentPosition == 0L -> "Stopped"
                             else -> "Paused"
                         },
                         style = MaterialTheme.typography.bodySmall,
                         color = when {
+                            isLoadingStream -> MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
                             isPlaying -> MaterialTheme.colorScheme.primary
                             currentPosition == 0L -> MaterialTheme.colorScheme.error
                             else -> MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
@@ -150,7 +155,15 @@ fun PlayerScreen(
                     
                     // Show progress info - always visible if song exists
                     Spacer(modifier = Modifier.height(4.dp))
-                    if (duration > 0) {
+                    if (isLoadingStream) {
+                        Text(
+                            text = "Fetching stream...",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                    } else if (duration > 0) {
                         Text(
                             text = "${formatTime(currentPosition)} / ${formatTime(duration)}",
                             style = MaterialTheme.typography.bodySmall,
@@ -373,57 +386,25 @@ fun PlayerScreen(
                         .fillMaxWidth()
                         .weight(1f)
                         .padding(16.dp),
-                    elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
+                    elevation = CardDefaults.cardElevation(defaultElevation = 4.dp),
+                    shape = RoundedCornerShape(16.dp)
                 ) {
                     Box(
                         modifier = Modifier.fillMaxSize(),
                         contentAlignment = Alignment.Center
                     ) {
-                        if (currentVideoId != null) {
-                            // WebView lives in android.R.id.content (GONE) — no Compose hosting needed.
-                            Column(
-                                modifier = Modifier.fillMaxSize(),
-                                horizontalAlignment = Alignment.CenterHorizontally,
-                                verticalArrangement = Arrangement.Center
-                            ) {
-                                Text(text = "🎵", style = MaterialTheme.typography.displayLarge)
-                                Spacer(modifier = Modifier.height(16.dp))
-                                Text(
-                                    text = "YouTube Music",
-                                    style = MaterialTheme.typography.bodyLarge,
-                                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
-                                )
-                                Spacer(modifier = Modifier.height(8.dp))
-                                Text(
-                                    text = when {
-                                        isPlaying -> "Streaming"
-                                        currentPosition > 0 -> "Paused"
-                                        duration > 0 -> "Ready"
-                                        else -> "Loading..."
-                                    },
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = if (isPlaying) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
-                                )
-                            }
+                        val thumbUrl = currentSong?.thumbnailUrl
+                        if (!thumbUrl.isNullOrBlank()) {
+                            AsyncImage(
+                                model = thumbUrl,
+                                contentDescription = currentSong?.title,
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .clip(RoundedCornerShape(16.dp)),
+                                contentScale = ContentScale.Crop
+                            )
                         } else {
-                            Column(
-                                horizontalAlignment = Alignment.CenterHorizontally,
-                                verticalArrangement = Arrangement.Center
-                            ) {
-                                Text(text = "🎵", style = MaterialTheme.typography.displayLarge)
-                                Spacer(modifier = Modifier.height(16.dp))
-                                Text(
-                                    text = "ExoPlayer Audio",
-                                    style = MaterialTheme.typography.bodyLarge,
-                                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
-                                )
-                                Spacer(modifier = Modifier.height(8.dp))
-                                Text(
-                                    text = "Background playback supported",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.primary
-                                )
-                            }
+                            Text(text = "🎵", style = MaterialTheme.typography.displayLarge)
                         }
                     }
                 }
@@ -462,14 +443,20 @@ fun PlayerScreen(
                         )
                     }
                 } else {
-                    LazyColumn {
-                        items(playlists) { playlist ->
-                            TextButton(
-                                onClick = {
-                                    viewModel.addCurrentSongToPlaylist(playlist.id)
-                                    showPlaylistDialog = false
-                                },
-                                modifier = Modifier.fillMaxWidth()
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .verticalScroll(rememberScrollState())
+                    ) {
+                        playlists.forEach { playlist ->
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable {
+                                        viewModel.addCurrentSongToPlaylist(playlist.id)
+                                        showPlaylistDialog = false
+                                    }
+                                    .padding(vertical = 14.dp, horizontal = 4.dp)
                             ) {
                                 Text(
                                     text = playlist.name,
@@ -478,36 +465,67 @@ fun PlayerScreen(
                                 )
                             }
                         }
-                        item {
-                            Divider()
-                            TextButton(
-                                onClick = { },
-                                modifier = Modifier.fillMaxWidth()
-                            ) {
-                                Text("New Playlist")
-                            }
+                        Divider()
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable {
+                                    showPlaylistDialog = false
+                                    showCreatePlaylistDialog = true
+                                }
+                                .padding(vertical = 14.dp, horizontal = 4.dp)
+                        ) {
+                            Text(
+                                text = "New Playlist",
+                                color = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.fillMaxWidth(),
+                                textAlign = TextAlign.Start
+                            )
                         }
                     }
                 }
             },
+            confirmButton = {},
+            dismissButton = {
+                Button(onClick = { showPlaylistDialog = false }) { Text("Cancel") }
+            }
+        )
+    }
+
+    // Create new playlist dialog
+    if (showCreatePlaylistDialog) {
+        AlertDialog(
+            onDismissRequest = {
+                showCreatePlaylistDialog = false
+                newPlaylistName = ""
+            },
+            title = { Text("New Playlist") },
+            text = {
+                OutlinedTextField(
+                    value = newPlaylistName,
+                    onValueChange = { newPlaylistName = it },
+                    label = { Text("Playlist name") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+            },
             confirmButton = {
-                if (playlists.isEmpty() && newPlaylistName.isNotBlank()) {
-                    Button(
-                        onClick = {
+                Button(
+                    onClick = {
+                        if (newPlaylistName.isNotBlank()) {
                             viewModel.createPlaylist(newPlaylistName)
                             newPlaylistName = ""
-                            showPlaylistDialog = false
+                            showCreatePlaylistDialog = false
                         }
-                    ) {
-                        Text("Create & Add")
-                    }
-                } else {
-                    Button(
-                        onClick = { showPlaylistDialog = false }
-                    ) {
-                        Text("Cancel")
-                    }
-                }
+                    },
+                    enabled = newPlaylistName.isNotBlank()
+                ) { Text("Create & Add") }
+            },
+            dismissButton = {
+                TextButton(onClick = {
+                    showCreatePlaylistDialog = false
+                    newPlaylistName = ""
+                }) { Text("Cancel") }
             }
         )
     }

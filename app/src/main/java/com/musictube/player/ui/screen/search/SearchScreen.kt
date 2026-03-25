@@ -7,7 +7,7 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.*
@@ -36,36 +36,60 @@ fun SearchScreen(
     val canLoadMore by viewModel.canLoadMore.collectAsState()
     val downloadStatus by viewModel.downloadStatus.collectAsState()
     val downloadProgress by viewModel.downloadProgress.collectAsState()
+    val downloadErrors by viewModel.downloadErrors.collectAsState()
     val downloadedVideoIds by viewModel.downloadedVideoIds.collectAsState()
-    val errorMessage by viewModel.errorMessage.collectAsState()
+    val previewVideoId by viewModel.previewVideoId.collectAsState()
+    val previewIsPlaying by viewModel.previewIsPlaying.collectAsState()
+    val previewIsLoading by viewModel.previewIsLoading.collectAsState()
     val keyboardController = LocalSoftwareKeyboardController.current
     
     // Lazy list state for infinite scroll
     val lazyListState = rememberLazyListState()
-    
-    // Detect when user scrolls near the end and load more results
+
+    // Trigger load-more whenever the user scrolls within 5 items of the bottom.
     LaunchedEffect(lazyListState) {
-        snapshotFlow { lazyListState.layoutInfo.visibleItemsInfo }
-            .collect { visibleItems ->
-                if (visibleItems.isNotEmpty()) {
-                    val lastVisibleIndex = lazyListState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: -1
-                    val totalItems = lazyListState.layoutInfo.totalItemsCount - 1
-                    
-                    // Load more only when scrolled near the end AND there are more results available
-                    if (lastVisibleIndex >= totalItems - 3 && !isLoading && !isLoadingMore && canLoadMore && searchResults.isNotEmpty()) {
-                        viewModel.loadMoreResults()
-                    }
+        snapshotFlow {
+            val lastVisible = lazyListState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0
+            val total = lazyListState.layoutInfo.totalItemsCount
+            total > 0 && lastVisible >= total - 5
+        }.collect { nearBottom ->
+            if (nearBottom) {
+                viewModel.loadMoreResults()
+            }
+        }
+    }
+
+    // Re-trigger after a load finishes in case snapshotFlow didn't re-emit
+    // (nearBottom stays true the whole time when results fill less than a screen).
+    // Small delay lets the ViewModel finish updating canLoadMore before we read it.
+    LaunchedEffect(isLoadingMore) {
+        if (!isLoadingMore && searchResults.isNotEmpty()) {
+            kotlinx.coroutines.delay(100)
+            if (canLoadMore) {
+                val lastVisible = lazyListState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0
+                val total = lazyListState.layoutInfo.totalItemsCount
+                if (total > 0 && lastVisible >= total - 5) {
+                    viewModel.loadMoreResults()
                 }
             }
+        }
     }
     
+    var navigatingBack by remember { mutableStateOf(false) }
+
     Scaffold(
         topBar = {
             TopAppBar(
                 title = { Text("Search Music") },
                 navigationIcon = {
-                    IconButton(onClick = onNavigateBack) {
-                        Icon(Icons.Default.ArrowBack, contentDescription = "Back")
+                    IconButton(onClick = {
+                        if (!navigatingBack) {
+                            navigatingBack = true
+                            viewModel.clearSearch()
+                            onNavigateBack()
+                        }
+                    }) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
                     }
                 }
             )
@@ -109,7 +133,7 @@ fun SearchScreen(
                 ),
                 singleLine = true
             )
-            
+
             // Search results
             Box(
                 modifier = Modifier.weight(1f)
@@ -148,16 +172,23 @@ fun SearchScreen(
                             ),
                             verticalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
-                            items(searchResults) { result ->
+                            items(searchResults, key = { it.id }) { result ->
                                 SearchResultItem(
                                     searchResult = result,
                                     downloadStatus = if (result.id in downloadedVideoIds) DownloadStatus.COMPLETED
                                                      else (downloadStatus[result.id] ?: DownloadStatus.IDLE),
                                     downloadProgress = downloadProgress[result.id] ?: 0,
+                                    downloadError = downloadErrors[result.id],
+                                    isPreviewPlaying = previewVideoId == result.id && previewIsPlaying,
+                                    isPreviewLoading = previewVideoId == result.id && previewIsLoading,
+                                    onPreviewPlay = {
+                                        keyboardController?.hide()
+                                        viewModel.togglePreview(result)
+                                    },
                                     onDownload = { viewModel.downloadSong(result) },
                                     onPlay = {
                                         viewModel.playSearchResult(result)
-                                        keyboardController?.hide() // Hide keyboard before navigation
+                                        keyboardController?.hide()
                                         onNavigateToPlayer()
                                     }
                                 )

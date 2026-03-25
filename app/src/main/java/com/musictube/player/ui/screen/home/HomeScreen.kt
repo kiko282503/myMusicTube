@@ -9,8 +9,10 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.LibraryMusic
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
@@ -26,7 +28,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
-import coil.compose.AsyncImage
+import androidx.compose.ui.platform.LocalContext
+import coil.compose.SubcomposeAsyncImage
+import coil.request.ImageRequest
 import com.musictube.player.data.model.Playlist
 import com.musictube.player.ui.component.SearchResultItem
 import com.musictube.player.service.DownloadStatus
@@ -56,19 +60,117 @@ fun HomeScreen(
     val miniPlayerPosition by viewModel.currentPosition.collectAsState()
     val miniPlayerDuration by viewModel.duration.collectAsState()
     val miniPlayerQueueSize by viewModel.playQueueSize.collectAsState()
+    val previewVideoId by viewModel.previewVideoId.collectAsState()
+    val previewIsPlaying by viewModel.previewIsPlaying.collectAsState()
+    val previewIsLoading by viewModel.previewIsLoading.collectAsState()
+
+    // Rename dialog state
+    var renamingPlaylist by remember { mutableStateOf<com.musictube.player.data.model.Playlist?>(null) }
+    var renameText by remember { mutableStateOf("") }
+    // Delete confirmation state
+    var deletingPlaylist by remember { mutableStateOf<com.musictube.player.data.model.Playlist?>(null) }
+    // Create playlist dialog state
+    var showCreatePlaylistDialog by remember { mutableStateOf(false) }
+    var newPlaylistName by remember { mutableStateOf("") }
+
+    val favoritesName = "Favorites"
+    val offlineDownloadsName = "Offline Downloads"
+
+    // Create playlist dialog
+    if (showCreatePlaylistDialog) {
+        AlertDialog(
+            onDismissRequest = { showCreatePlaylistDialog = false; newPlaylistName = "" },
+            title = { Text("New Playlist") },
+            text = {
+                OutlinedTextField(
+                    value = newPlaylistName,
+                    onValueChange = { newPlaylistName = it },
+                    label = { Text("Playlist name") },
+                    singleLine = true
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        if (newPlaylistName.isNotBlank()) {
+                            viewModel.createPlaylist(newPlaylistName)
+                        }
+                        showCreatePlaylistDialog = false
+                        newPlaylistName = ""
+                    }
+                ) { Text("Create") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showCreatePlaylistDialog = false; newPlaylistName = "" }) { Text("Cancel") }
+            }
+        )
+    }
+
+    // Rename dialog
+    renamingPlaylist?.let { playlist ->
+        AlertDialog(
+            onDismissRequest = { renamingPlaylist = null },
+            title = { Text("Rename Playlist") },
+            text = {
+                OutlinedTextField(
+                    value = renameText,
+                    onValueChange = { renameText = it },
+                    label = { Text("Playlist name") },
+                    singleLine = true
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        if (renameText.isNotBlank()) {
+                            viewModel.renamePlaylist(playlist.id, renameText)
+                        }
+                        renamingPlaylist = null
+                    }
+                ) { Text("Rename") }
+            },
+            dismissButton = {
+                TextButton(onClick = { renamingPlaylist = null }) { Text("Cancel") }
+            }
+        )
+    }
+
+    // Delete confirmation dialog
+    deletingPlaylist?.let { playlist ->
+        AlertDialog(
+            onDismissRequest = { deletingPlaylist = null },
+            title = { Text("Delete Playlist") },
+            text = { Text("Delete \"${playlist.name}\"? This cannot be undone.") },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        viewModel.deletePlaylist(playlist.id)
+                        deletingPlaylist = null
+                    }
+                ) { Text("Delete", color = MaterialTheme.colorScheme.error) }
+            },
+            dismissButton = {
+                TextButton(onClick = { deletingPlaylist = null }) { Text("Cancel") }
+            }
+        )
+    }
 
     val homePlaylists by remember(playlists, offlinePlaylistId) {
         derivedStateOf {
             val offline = playlists.firstOrNull { it.id == offlinePlaylistId }
-            val userPlaylists = playlists
+            val favorites = playlists.firstOrNull {
+                it.id != offlinePlaylistId && it.name.equals("Favorites", ignoreCase = true)
+            }
+            val rest = playlists
                 .asSequence()
-                .filter { it.id != offlinePlaylistId }
+                .filter { it.id != offlinePlaylistId && !it.name.equals("Favorites", ignoreCase = true) }
                 .sortedByDescending { it.dateCreated }
                 .toList()
 
             buildList {
                 if (offline != null) add(offline)
-                addAll(userPlaylists)
+                if (favorites != null) add(favorites)
+                addAll(rest)
             }
         }
     }
@@ -92,7 +194,7 @@ fun HomeScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("MusicTube", fontWeight = FontWeight.Bold) },
+                title = { Text("My Music Player", fontWeight = FontWeight.Bold) },
                 actions = {
                     IconButton(onClick = onNavigateToSearch) {
                         Icon(Icons.Default.Search, contentDescription = "Search")
@@ -100,14 +202,7 @@ fun HomeScreen(
                 }
             )
         },
-        floatingActionButton = {
-            FloatingActionButton(
-                onClick = onNavigateToSearch,
-                containerColor = MaterialTheme.colorScheme.primary
-            ) {
-                Icon(Icons.Default.Search, contentDescription = "Search Music")
-            }
-        },
+
         bottomBar = {
             // Show Now Playing bar when a song is active so the user can return to the player
             val song = nowPlayingSong
@@ -199,40 +294,108 @@ fun HomeScreen(
                 .fillMaxSize()
                 .padding(paddingValues)
         ) {
-            if (isLoading && trendingSongs.isEmpty()) {
-                CircularProgressIndicator(modifier = Modifier.align(Alignment.Center))
-            } else {
-                LazyColumn(
-                    state = listState,
-                    modifier = Modifier.fillMaxSize(),
-                    contentPadding = PaddingValues(bottom = 80.dp)
-                ) {
+            LazyColumn(
+                state = listState,
+                modifier = Modifier.fillMaxSize(),
+                contentPadding = PaddingValues(bottom = 80.dp)
+            ) {
                     item {
-                        if (homePlaylists.isNotEmpty()) {
-                            Column(
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(top = 12.dp)
+                        ) {
+                            Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .padding(top = 12.dp)
+                                    .padding(horizontal = 16.dp, vertical = 8.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
                             ) {
                                 Text(
                                     text = "Playlist",
                                     style = MaterialTheme.typography.titleLarge,
-                                    fontWeight = FontWeight.Bold,
-                                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
+                                    fontWeight = FontWeight.Bold
                                 )
-                                Row(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .horizontalScroll(rememberScrollState())
-                                        .padding(horizontal = 12.dp),
-                                    horizontalArrangement = Arrangement.spacedBy(12.dp)
-                                ) {
+                                TextButton(onClick = { showCreatePlaylistDialog = true }) {
+                                    Icon(
+                                        imageVector = Icons.Default.Add,
+                                        contentDescription = "New Playlist",
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text("New Playlist")
+                                }
+                            }
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .horizontalScroll(rememberScrollState())
+                                    .padding(horizontal = 12.dp),
+                                horizontalArrangement = Arrangement.spacedBy(12.dp)
+                            ) {
+                                if (homePlaylists.isEmpty()) {
+                                    // Skeleton: 2 placeholder playlist cards while DB loads
+                                    repeat(2) {
+                                        Card(
+                                            modifier = Modifier.width(112.dp),
+                                            shape = RoundedCornerShape(12.dp),
+                                            colors = CardDefaults.cardColors(
+                                                containerColor = MaterialTheme.colorScheme.surfaceVariant
+                                            )
+                                        ) {
+                                            Column(modifier = Modifier.padding(8.dp)) {
+                                                Box(
+                                                    modifier = Modifier
+                                                        .fillMaxWidth()
+                                                        .aspectRatio(1f)
+                                                        .clip(RoundedCornerShape(10.dp)),
+                                                    contentAlignment = Alignment.Center
+                                                ) {
+                                                    Surface(
+                                                        modifier = Modifier.fillMaxSize(),
+                                                        shape = RoundedCornerShape(10.dp),
+                                                        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.5f)
+                                                    ) {}
+                                                    CircularProgressIndicator(
+                                                        modifier = Modifier.size(24.dp),
+                                                        strokeWidth = 2.dp
+                                                    )
+                                                }
+                                                Spacer(modifier = Modifier.height(8.dp))
+                                                Surface(
+                                                    modifier = Modifier
+                                                        .fillMaxWidth(0.8f)
+                                                        .height(12.dp),
+                                                    shape = RoundedCornerShape(4.dp),
+                                                    color = MaterialTheme.colorScheme.surface.copy(alpha = 0.5f)
+                                                ) {}
+                                                Spacer(modifier = Modifier.height(4.dp))
+                                                Surface(
+                                                    modifier = Modifier
+                                                        .fillMaxWidth(0.6f)
+                                                        .height(10.dp),
+                                                    shape = RoundedCornerShape(4.dp),
+                                                    color = MaterialTheme.colorScheme.surface.copy(alpha = 0.5f)
+                                                ) {}
+                                            }
+                                        }
+                                    }
+                                } else {
                                     homePlaylists.forEach { playlist ->
+                                        val isSystem = playlist.id == offlinePlaylistId ||
+                                            playlist.name.equals(favoritesName, ignoreCase = true)
                                         HomePlaylistCard(
                                             playlist = playlist,
                                             isOfflinePlaylist = playlist.id == offlinePlaylistId,
                                             offlineSongCount = offlineSongCount,
-                                            onClick = { onNavigateToPlaylist(playlist.id) }
+                                            isSystemPlaylist = isSystem,
+                                            onClick = { onNavigateToPlaylist(playlist.id) },
+                                            onRename = {
+                                                renameText = playlist.name
+                                                renamingPlaylist = playlist
+                                            },
+                                            onDelete = { deletingPlaylist = playlist }
                                         )
                                     }
                                 }
@@ -240,7 +403,8 @@ fun HomeScreen(
                         }
                     }
 
-                    if (quickPicks.isNotEmpty()) {
+                    // Quick picks section — show skeleton while loading, real cards once ready
+                    if (isLoading || quickPicks.isNotEmpty()) {
                         item {
                             Row(
                                 modifier = Modifier
@@ -254,37 +418,103 @@ fun HomeScreen(
                                     style = MaterialTheme.typography.titleLarge,
                                     fontWeight = FontWeight.Bold
                                 )
-                                TextButton(onClick = onNavigateToQuickPicks) {
-                                    Text("More →", style = MaterialTheme.typography.labelLarge)
+                                if (quickPicks.isNotEmpty()) {
+                                    TextButton(onClick = onNavigateToQuickPicks) {
+                                        Text("More →", style = MaterialTheme.typography.labelLarge)
+                                    }
                                 }
                             }
                         }
                         item {
-                            val rows = quickPicks.chunked(2)
                             Column(
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .padding(horizontal = 12.dp),
                                 verticalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
-                                rows.forEach { rowItems ->
-                                    Row(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                                    ) {
-                                        rowItems.forEach { pick ->
-                                            QuickPickCard(
-                                                modifier = Modifier.weight(1f),
-                                                title = pick.title,
-                                                artist = pick.artist,
-                                                thumbnailUrl = pick.thumbnailUrl,
-                                                onClick = {
-                                                    viewModel.playSearchResult(pick)
-                                                    onNavigateToPlayer()
+                                if (isLoading && quickPicks.isEmpty()) {
+                                    // Skeleton: 3 rows of 2 placeholder cards
+                                    repeat(3) {
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                        ) {
+                                            repeat(2) {
+                                                Card(
+                                                    modifier = Modifier
+                                                        .weight(1f)
+                                                        .height(72.dp),
+                                                    shape = RoundedCornerShape(8.dp),
+                                                    colors = CardDefaults.cardColors(
+                                                        containerColor = MaterialTheme.colorScheme.surfaceVariant
+                                                    )
+                                                ) {
+                                                    Row(
+                                                        modifier = Modifier.fillMaxSize(),
+                                                        verticalAlignment = Alignment.CenterVertically
+                                                    ) {
+                                                        Box(
+                                                            modifier = Modifier
+                                                                .size(72.dp)
+                                                                .clip(RoundedCornerShape(topStart = 8.dp, bottomStart = 8.dp)),
+                                                            contentAlignment = Alignment.Center
+                                                        ) {
+                                                            Surface(
+                                                                modifier = Modifier.fillMaxSize(),
+                                                                color = MaterialTheme.colorScheme.surface.copy(alpha = 0.5f)
+                                                            ) {}
+                                                            CircularProgressIndicator(
+                                                                modifier = Modifier.size(20.dp),
+                                                                strokeWidth = 2.dp
+                                                            )
+                                                        }
+                                                        Column(
+                                                            modifier = Modifier
+                                                                .weight(1f)
+                                                                .padding(horizontal = 10.dp),
+                                                            verticalArrangement = Arrangement.spacedBy(6.dp)
+                                                        ) {
+                                                            Surface(
+                                                                modifier = Modifier
+                                                                    .fillMaxWidth(0.8f)
+                                                                    .height(12.dp),
+                                                                shape = RoundedCornerShape(4.dp),
+                                                                color = MaterialTheme.colorScheme.surface.copy(alpha = 0.5f)
+                                                            ) {}
+                                                            Surface(
+                                                                modifier = Modifier
+                                                                    .fillMaxWidth(0.5f)
+                                                                    .height(10.dp),
+                                                                shape = RoundedCornerShape(4.dp),
+                                                                color = MaterialTheme.colorScheme.surface.copy(alpha = 0.5f)
+                                                            ) {}
+                                                        }
+                                                    }
                                                 }
-                                            )
+                                            }
                                         }
-                                        if (rowItems.size == 1) Spacer(Modifier.weight(1f))
+                                    }
+                                } else {
+                                    val rows = quickPicks.chunked(2)
+                                    rows.forEach { rowItems ->
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                        ) {
+                                            rowItems.forEach { pick ->
+                                                QuickPickCard(
+                                                    modifier = Modifier.weight(1f),
+                                                    title = pick.title,
+                                                    artist = pick.artist,
+                                                    thumbnailUrl = pick.thumbnailUrl,
+                                                    onClick = {
+                                                        viewModel.playSearchResult(pick)
+                                                        onNavigateToPlayer()
+                                                    }
+                                                )
+                                            }
+                                            if (rowItems.size == 1) Spacer(Modifier.weight(1f))
+                                        }
                                     }
                                 }
                             }
@@ -300,7 +530,60 @@ fun HomeScreen(
                         )
                     }
 
-                    if (trendingSongs.isEmpty()) {
+                    if (isLoading && trendingSongs.isEmpty()) {
+                        items(5) {
+                            Card(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 8.dp, vertical = 4.dp),
+                                shape = RoundedCornerShape(12.dp),
+                                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+                            ) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(16.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Surface(
+                                        modifier = Modifier.size(56.dp),
+                                        shape = RoundedCornerShape(8.dp),
+                                        color = MaterialTheme.colorScheme.surfaceVariant
+                                    ) {
+                                        Box(
+                                            modifier = Modifier.fillMaxSize(),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            CircularProgressIndicator(
+                                                modifier = Modifier.size(20.dp),
+                                                strokeWidth = 2.dp
+                                            )
+                                        }
+                                    }
+                                    Spacer(Modifier.width(16.dp))
+                                    Column(
+                                        Modifier.weight(1f),
+                                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                                    ) {
+                                        Surface(
+                                            modifier = Modifier
+                                                .fillMaxWidth(0.7f)
+                                                .height(14.dp),
+                                            shape = RoundedCornerShape(4.dp),
+                                            color = MaterialTheme.colorScheme.surfaceVariant
+                                        ) {}
+                                        Surface(
+                                            modifier = Modifier
+                                                .fillMaxWidth(0.4f)
+                                                .height(10.dp),
+                                            shape = RoundedCornerShape(4.dp),
+                                            color = MaterialTheme.colorScheme.surfaceVariant
+                                        ) {}
+                                    }
+                                }
+                            }
+                        }
+                    } else if (trendingSongs.isEmpty()) {
                         item {
                             Column(
                                 modifier = Modifier
@@ -317,12 +600,15 @@ fun HomeScreen(
                             }
                         }
                     } else {
-                        items(trendingSongs) { result ->
+                        items(trendingSongs, key = { it.id }) { result ->
                             SearchResultItem(
                                 searchResult = result,
                                 downloadStatus = if (result.id in downloadedVideoIds) DownloadStatus.COMPLETED
                                                  else (downloadStatus[result.id] ?: DownloadStatus.IDLE),
                                 downloadProgress = downloadProgress[result.id] ?: 0,
+                                isPreviewPlaying = previewVideoId == result.id && previewIsPlaying,
+                                isPreviewLoading = previewVideoId == result.id && previewIsLoading,
+                                onPreviewPlay = { viewModel.togglePreview(result) },
                                 onDownload = { viewModel.downloadSong(result) },
                                 onPlay = {
                                     viewModel.playSearchResult(result)
@@ -344,7 +630,6 @@ fun HomeScreen(
                             }
                         }
                     }
-                }
             }
         }
     }
@@ -355,8 +640,12 @@ private fun HomePlaylistCard(
     playlist: Playlist,
     isOfflinePlaylist: Boolean,
     offlineSongCount: Int,
-    onClick: () -> Unit
+    isSystemPlaylist: Boolean,
+    onClick: () -> Unit,
+    onRename: () -> Unit = {},
+    onDelete: () -> Unit = {}
 ) {
+    var menuExpanded by remember { mutableStateOf(false) }
     Card(
         modifier = Modifier
             .width(112.dp)
@@ -368,14 +657,28 @@ private fun HomePlaylistCard(
     ) {
         Column(modifier = Modifier.padding(8.dp)) {
             if (!playlist.thumbnailUrl.isNullOrBlank()) {
-                AsyncImage(
-                    model = playlist.thumbnailUrl,
+                SubcomposeAsyncImage(
+                    model = ImageRequest.Builder(LocalContext.current)
+                        .data(playlist.thumbnailUrl)
+                        .crossfade(200)
+                        .build(),
                     contentDescription = null,
                     contentScale = ContentScale.Crop,
                     modifier = Modifier
                         .fillMaxWidth()
                         .aspectRatio(1f)
-                        .clip(RoundedCornerShape(10.dp))
+                        .clip(RoundedCornerShape(10.dp)),
+                    loading = {
+                        Box(
+                            modifier = Modifier.fillMaxSize(),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(20.dp),
+                                strokeWidth = 2.dp
+                            )
+                        }
+                    }
                 )
             } else {
                 Surface(
@@ -429,6 +732,43 @@ private fun HomePlaylistCard(
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
+
+            if (!isSystemPlaylist) {
+                Box(modifier = Modifier.fillMaxWidth()) {
+                    IconButton(
+                        onClick = { menuExpanded = true },
+                        modifier = Modifier
+                            .size(28.dp)
+                            .align(Alignment.CenterEnd)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.MoreVert,
+                            contentDescription = "Playlist options",
+                            modifier = Modifier.size(18.dp),
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    DropdownMenu(
+                        expanded = menuExpanded,
+                        onDismissRequest = { menuExpanded = false }
+                    ) {
+                        DropdownMenuItem(
+                            text = { Text("Rename") },
+                            onClick = {
+                                menuExpanded = false
+                                onRename()
+                            }
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Delete", color = MaterialTheme.colorScheme.error) },
+                            onClick = {
+                                menuExpanded = false
+                                onDelete()
+                            }
+                        )
+                    }
+                }
+            }
         }
     }
 }
@@ -454,29 +794,49 @@ private fun QuickPickCard(
             modifier = Modifier.fillMaxSize(),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // Square thumbnail on the left
-            if (thumbnailUrl.isNotEmpty()) {
-                AsyncImage(
-                    model = thumbnailUrl,
+            Box(
+                modifier = Modifier
+                    .size(72.dp)
+                    .clip(RoundedCornerShape(topStart = 8.dp, bottomStart = 8.dp)),
+                contentAlignment = Alignment.Center
+            ) {
+                SubcomposeAsyncImage(
+                    model = ImageRequest.Builder(LocalContext.current)
+                        .data(thumbnailUrl.ifEmpty { null })
+                        .crossfade(200)
+                        .build(),
                     contentDescription = null,
                     contentScale = ContentScale.Crop,
-                    modifier = Modifier
-                        .size(72.dp)
-                        .clip(RoundedCornerShape(topStart = 8.dp, bottomStart = 8.dp))
+                    modifier = Modifier.fillMaxSize(),
+                    loading = {
+                        Surface(
+                            modifier = Modifier.fillMaxSize(),
+                            color = MaterialTheme.colorScheme.secondaryContainer
+                        ) {
+                            Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(20.dp),
+                                    strokeWidth = 2.dp
+                                )
+                            }
+                        }
+                    },
+                    error = {
+                        Surface(
+                            modifier = Modifier.fillMaxSize(),
+                            color = MaterialTheme.colorScheme.secondaryContainer
+                        ) {
+                            Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
+                                Icon(
+                                    Icons.Default.MusicNote,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(24.dp),
+                                    tint = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.5f)
+                                )
+                            }
+                        }
+                    }
                 )
-            } else {
-                Box(
-                    modifier = Modifier
-                        .size(72.dp)
-                        .clip(RoundedCornerShape(topStart = 8.dp, bottomStart = 8.dp)),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(
-                        Icons.Default.PlayArrow,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
             }
             Column(
                 modifier = Modifier

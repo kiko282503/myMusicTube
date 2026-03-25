@@ -51,8 +51,14 @@ class QuickPicksViewModel @Inject constructor(
             try {
                 val query = getRandomQuery()
                 page++
-                val results = searchService.searchMusic(query, songsOnly = true)
-                _songs.value = _songs.value + results
+                // Try songs-only first; fall back to mixed results if empty
+                val songOnlyResults = searchService.searchMusic(query, songsOnly = true)
+                val results = if (songOnlyResults.isNotEmpty()) {
+                    songOnlyResults
+                } else {
+                    searchService.searchMusic(query, songsOnly = false)
+                }
+                _songs.value = (_songs.value + results).distinctBy { it.id }
             } catch (e: Exception) {
                 Log.e("QuickPicksViewModel", "Failed to load picks", e)
             } finally {
@@ -64,6 +70,12 @@ class QuickPicksViewModel @Inject constructor(
 
     fun playSearchResult(searchResult: SearchResult) {
         if (!searchResult.isPlayable) return
+
+        // If this song is already playing or loading (e.g. via preview), just navigate
+        // to the player without restarting — let it continue from where it is.
+        val alreadyCurrent = playerManager.currentVideoId.value == searchResult.id
+        val activeStream = playerManager.isPlaying.value || playerManager.isLoadingStream.value
+        if (alreadyCurrent && activeStream) return
 
         playerManager.playYouTubeAudioStream(
             videoId = searchResult.id,

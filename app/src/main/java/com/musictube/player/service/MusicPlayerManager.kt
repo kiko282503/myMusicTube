@@ -39,7 +39,8 @@ import javax.inject.Singleton
 class MusicPlayerManager @Inject constructor(
     @ApplicationContext private val context: Context,
     private val audioExtractor: YouTubeAudioExtractor,
-    private val localAudioManager: LocalAudioManager
+    private val localAudioManager: LocalAudioManager,
+    private val youTubeStreamService: YouTubeStreamService
 ) {
 
     private val _currentSong = MutableStateFlow<Song?>(null)
@@ -74,6 +75,10 @@ class MusicPlayerManager @Inject constructor(
     private val _isRepeatOn = MutableStateFlow(false)
     val isRepeatOn: StateFlow<Boolean> = _isRepeatOn.asStateFlow()
 
+    // True while extracting a stream URL from YouTube (before ExoPlayer starts)
+    private val _isLoadingStream = MutableStateFlow(false)
+    val isLoadingStream: StateFlow<Boolean> = _isLoadingStream.asStateFlow()
+
     // Tracks which song IDs have been played in the current shuffle cycle
     private val _shuffleHistory = mutableListOf<Int>()
 
@@ -98,6 +103,7 @@ class MusicPlayerManager @Inject constructor(
             addListener(object : Player.Listener {
                 override fun onIsPlayingChanged(isPlaying: Boolean) {
                     _isPlaying.value = isPlaying
+                    if (isPlaying) _isLoadingStream.value = false
                 }
 
                 override fun onPlaybackStateChanged(playbackState: Int) {
@@ -407,19 +413,10 @@ class MusicPlayerManager @Inject constructor(
     fun replayCurrent() {
         val vid = _lastVideoId
         if (vid != null) {
-            val wv = _webView
-            if (wv != null && _currentVideoId.value == vid) {
-                // Page is already loaded — just clear the intentional-pause flag, seek to 0 and play.
+            if (_currentVideoId.value == vid && exoPlayer.playbackState != Player.STATE_IDLE) {
+                exoPlayer.seekTo(0)
+                exoPlayer.play()
                 startNotificationService(_lastTitle, _lastArtist, _lastThumb)
-                wv.post {
-                    wv.evaluateJavascript("""
-                        (function(){
-                          window._ytIntentionalPause = false;
-                          var v = document.querySelector('video');
-                          if (v) { v.currentTime = 0; v.play().catch(function(){}); }
-                        })();
-                    """.trimIndent(), null)
-                }
             } else {
                 playYouTubeAudioStream(vid, _lastTitle, _lastArtist, _lastThumb)
             }
@@ -485,18 +482,15 @@ class MusicPlayerManager @Inject constructor(
     }
 
     /**
-     * Play a YouTube song by loading the full music.youtube.com page in the WebView.
-     * No embed restrictions, no extraction needed — same as opening in a browser.
-     * JS injected on pageFinished monitors the <video> element and bridges state back.
+     * Play a YouTube song by extracting a direct audio stream URL and playing via ExoPlayer.
+     * This bypasses the YouTube Music web player entirely, so no ads are served.
+     * URL extraction uses a 5-strategy cascade: Innertube Android → NewPipe → Piped → Invidious → Cobalt.
      */
     fun playYouTubeAudioStream(videoId: String, title: String, artist: String, thumbnailUrl: String?) {
-        android.util.Log.i("MusicPlayerManager", "Loading music.youtube.com for: $title ($videoId)")
-
         if (!_isPlayingViaQueue) {
             _playQueue.value = emptyList()
             _queueIndex.value = -1
         }
-        // Remember for stop→play
         _lastVideoId = videoId
         _lastTitle = title
         _lastArtist = artist
@@ -517,11 +511,25 @@ class MusicPlayerManager @Inject constructor(
         _currentPosition.value = 0L
         _duration.value = 0L
 
-        val wv = getOrCreateWebView(context)
-        val url = "https://music.youtube.com/watch?v=$videoId&autoplay=1"
-        wv.post { wv.loadUrl(url) }
-
         startNotificationService(title, artist, thumbnailUrl)
+
+        _isLoadingStream.value = true
+        scope.launch {
+            val audioUrl = youTubeStreamService.extractAudioUrl(videoId)
+            if (audioUrl != null) {
+                val mediaItem = MediaItem.Builder()
+                    .setUri(audioUrl)
+                    .setMediaId("yt_$videoId")
+                    .build()
+                exoPlayer.setMediaItem(mediaItem)
+                exoPlayer.prepare()
+                exoPlayer.play()
+                // _isLoadingStream is cleared in onIsPlayingChanged(true)
+            } else {
+                _isLoadingStream.value = false
+                android.util.Log.e("MusicPlayerManager", "Failed to extract audio URL for $videoId")
+            }
+        }
     }
 
     /** JavaScript interface bridging <video> element events into our StateFlows. */
@@ -576,36 +584,16 @@ class MusicPlayerManager @Inject constructor(
     }
 
     fun pause() {
-        if (_currentVideoId.value != null) {
-            _isPlaying.value = false
-            // Set intentional-pause flag BEFORE pausing so the JS retry interval doesn't
-            // immediately restart the video.
-            _webView?.post { _webView?.evaluateJavascript(
-                "window._ytIntentionalPause=true; var v=document.querySelector('video'); if(v) v.pause();", null) }
-        } else {
-            exoPlayer.pause()
-        }
+        exoPlayer.pause()
     }
 
     fun resume() {
-        if (_currentVideoId.value != null) {
-            _isPlaying.value = true
-            _webView?.post { _webView?.evaluateJavascript(
-                "window._ytIntentionalPause=false; var v=document.querySelector('video'); if(v) v.play();", null) }
-        } else {
-            if (exoPlayer.playbackState == Player.STATE_ENDED) exoPlayer.seekTo(0)
-            exoPlayer.play()
-        }
+        if (exoPlayer.playbackState == Player.STATE_ENDED) exoPlayer.seekTo(0)
+        exoPlayer.play()
     }
 
     fun stop() {
         try {
-            if (_currentVideoId.value != null) {
-                // Set intentional-pause flag FIRST so the retry interval stops fighting us.
-                _webView?.post { _webView?.evaluateJavascript(
-                    "window._ytIntentionalPause=true; var v=document.querySelector('video'); if(v){v.pause();v.currentTime=0;}", null) }
-                // Keep _currentVideoId set so play() knows to use the already-loaded page
-            }
             exoPlayer.stop()
             _isPlaying.value = false
             _currentPosition.value = 0L
@@ -620,15 +608,8 @@ class MusicPlayerManager @Inject constructor(
     }
 
     fun seekTo(position: Long) {
-        if (_currentVideoId.value != null) {
-            val seconds = position / 1000.0
-            _currentPosition.value = position
-            _webView?.post { _webView?.evaluateJavascript(
-                "var v=document.querySelector('video'); if(v) v.currentTime=$seconds;", null) }
-        } else {
-            exoPlayer.seekTo(position)
-            _currentPosition.value = position
-        }
+        exoPlayer.seekTo(position)
+        _currentPosition.value = position
     }
 
     fun setVolume(volume: Float) {
