@@ -72,17 +72,19 @@ fun SharedPlaylistScreen(
     val isPlaying by viewModel.isPlaying.collectAsState()
     val currentPosition by viewModel.currentPosition.collectAsState()
     val duration by viewModel.duration.collectAsState()
+    // Comes from a combine() StateFlow in the ViewModel — persists across navigation
+    val playingFromHere by viewModel.isPlayingFromHere.collectAsState()
     val snackbarHostState = remember { SnackbarHostState() }
     var showSaveDialog by remember { mutableStateOf(false) }
     var saveNameText by remember { mutableStateOf(playlistData?.name ?: "") }
     var navigatingBack by remember { mutableStateOf(false) }
 
-    // Set of "yt_<videoId>" IDs in this shared playlist — used to detect if
-    // the currently playing song belongs here.
-    val sharedSongIds = remember(playlistData) {
-        playlistData?.songs?.map { "yt_${it.videoId}" }?.toSet() ?: emptySet()
+    // Register this playlist's song IDs with the ViewModel every time the
+    // screen enters composition (including after pressing back from PlayerScreen).
+    // This is what powers the playing indicators without any ID mismatch risk.
+    LaunchedEffect(playlistData) {
+        playlistData?.let { viewModel.setPlaylistSongs(it.songs) }
     }
-    val playingFromHere = currentSong?.id != null && currentSong!!.id in sharedSongIds
 
     LaunchedEffect(message) {
         val text = message ?: return@LaunchedEffect
