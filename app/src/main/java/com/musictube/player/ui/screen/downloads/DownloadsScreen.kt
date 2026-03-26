@@ -1,5 +1,6 @@
 package com.musictube.player.ui.screen.downloads
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -17,6 +18,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.ErrorOutline
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -106,7 +108,8 @@ fun DownloadsScreen(
                         result = result,
                         status = statusMap[result.id] ?: DownloadStatus.IDLE,
                         progress = progressMap[result.id] ?: 0,
-                        error = errorsMap[result.id]
+                        error = errorsMap[result.id],
+                        onRetry = { viewModel.retryDownload(result) }
                     )
                 }
             }
@@ -119,12 +122,20 @@ private fun DownloadItemRow(
     result: SearchResult,
     status: DownloadStatus,
     progress: Int,
-    error: String?
+    error: String?,
+    onRetry: () -> Unit = {}
 ) {
     Surface(
         shape = RoundedCornerShape(12.dp),
         tonalElevation = 2.dp,
-        modifier = Modifier.fillMaxWidth()
+        modifier = Modifier
+            .fillMaxWidth()
+            .then(
+                if (status == DownloadStatus.FAILED)
+                    Modifier.clickable(onClick = onRetry)
+                else
+                    Modifier
+            )
     ) {
         Row(
             modifier = Modifier
@@ -186,6 +197,11 @@ private fun DownloadItemRow(
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis
                         )
+                        Text(
+                            text = "Tap to retry",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.error.copy(alpha = 0.7f)
+                        )
                     }
                     DownloadStatus.COMPLETED -> {
                         Text(
@@ -213,8 +229,8 @@ private fun DownloadItemRow(
                     modifier = Modifier.size(22.dp)
                 )
                 DownloadStatus.FAILED -> Icon(
-                    Icons.Default.ErrorOutline,
-                    contentDescription = "Failed",
+                    Icons.Default.Refresh,
+                    contentDescription = "Retry",
                     tint = MaterialTheme.colorScheme.error,
                     modifier = Modifier.size(22.dp)
                 )

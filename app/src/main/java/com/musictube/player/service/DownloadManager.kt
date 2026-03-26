@@ -1,9 +1,13 @@
 package com.musictube.player.service
 
+import android.content.Context
+import android.content.Intent
+import android.os.Build
 import android.util.Log
 import com.musictube.player.data.model.SearchResult
 import com.musictube.player.data.model.Song
 import com.musictube.player.data.repository.MusicRepository
+import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -13,9 +17,8 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.sync.Semaphore
-import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
+import java.util.concurrent.atomic.AtomicInteger
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -30,15 +33,15 @@ enum class DownloadStatus {
  */
 @Singleton
 class DownloadManager @Inject constructor(
+    @ApplicationContext private val context: Context,
     private val downloader: OkHttpDownloader,
     private val youTubeStreamService: YouTubeStreamService,
     private val searchService: SearchService,
     private val musicRepository: MusicRepository
 ) {
+    // Counts downloads that are queued or running; used to start/stop the foreground service.
+    private val activeDownloadCount = AtomicInteger(0)
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
-
-    // Limit to 2 concurrent downloads to avoid YouTube API rate-limiting
-    private val downloadSemaphore = Semaphore(2)
 
     private val _downloadStatus = MutableStateFlow<Map<String, DownloadStatus>>(emptyMap())
     val downloadStatus: StateFlow<Map<String, DownloadStatus>> = _downloadStatus.asStateFlow()
@@ -73,6 +76,11 @@ class DownloadManager @Inject constructor(
         // Register song details so Downloads screen can display title/artist/thumbnail
         _downloadQueue.value = _downloadQueue.value + (searchResult.id to searchResult)
 
+        // Start the foreground service before the coroutine so the service is up
+        // even if the download waits behind the semaphore.
+        val count = activeDownloadCount.incrementAndGet()
+        if (count == 1) startDownloadService()
+
         scope.launch {
             val statusMap = _downloadStatus.value.toMutableMap()
             statusMap[searchResult.id] = DownloadStatus.DOWNLOADING
@@ -87,7 +95,6 @@ class DownloadManager @Inject constructor(
             errorMap.remove(searchResult.id)
             _downloadErrors.value = errorMap
 
-            downloadSemaphore.withPermit {
             try {
                 Log.d("DownloadManager", "Starting download for ${searchResult.id}: ${searchResult.title}")
 
@@ -156,8 +163,14 @@ class DownloadManager @Inject constructor(
                 val errorMap = _downloadErrors.value.toMutableMap()
                 errorMap[searchResult.id] = e.message ?: "Unknown error"
                 _downloadErrors.value = errorMap
+            } finally {
+                // Decrement active count; stop the foreground service when all done.
+                val remaining = activeDownloadCount.decrementAndGet()
+                if (remaining <= 0) {
+                    activeDownloadCount.set(0)
+                    stopDownloadService()
+                }
             }
-            } // end downloadSemaphore.withPermit
         }
     }
 
@@ -245,6 +258,24 @@ class DownloadManager @Inject constructor(
             Log.w("DownloadManager", "Failed to parse duration: $durationStr")
             0
         }
+    }
+
+    private fun startDownloadService() {
+        val intent = Intent(context, DownloadForegroundService::class.java).apply {
+            action = DownloadForegroundService.ACTION_START
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            context.startForegroundService(intent)
+        } else {
+            context.startService(intent)
+        }
+    }
+
+    private fun stopDownloadService() {
+        val intent = Intent(context, DownloadForegroundService::class.java).apply {
+            action = DownloadForegroundService.ACTION_STOP
+        }
+        context.startService(intent)
     }
 
     fun resetDownloadStatus(id: String) {
