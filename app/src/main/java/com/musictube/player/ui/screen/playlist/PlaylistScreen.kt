@@ -144,7 +144,7 @@ fun PlaylistScreen(
                     }
                 },
                 actions = {
-                    if (!isSelectMode && songs.isNotEmpty()) {
+                    if (!isSelectMode && songs.isNotEmpty() && !isOfflinePlaylist) {
                         IconButton(onClick = {
                             val playlistName = playlist?.name ?: "Playlist"
                             // Build a .musictube JSON file so the share shows as a tappable

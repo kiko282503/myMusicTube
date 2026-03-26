@@ -281,9 +281,22 @@ fun MusicTubeApp(
             startDestination = "home",
             modifier = Modifier.weight(1f)
         ) {
+
+        // If the user received a shared playlist and hasn't dismissed it yet, tapping
+        // the mini-player navigates back to shared_playlist so they can still save/play
+        // the list. Once they press Back from that screen, sharedPlaylistData is cleared
+        // and the mini-player reverts to opening the regular player screen.
+        val onNavigateToPlayer: () -> Unit = {
+            if (sharedPlaylistData != null) {
+                navController.navigate("shared_playlist") { launchSingleTop = true }
+            } else {
+                navController.navigate("player") { launchSingleTop = true }
+            }
+        }
+
         composable("home") {
             HomeScreen(
-                onNavigateToPlayer = { navController.navigate("player") { launchSingleTop = true } },
+                onNavigateToPlayer = onNavigateToPlayer,
                 onNavigateToSearch = { navController.navigate("search") { launchSingleTop = true } },
                 onNavigateToQuickPicks = { navController.navigate("quick_picks") { launchSingleTop = true } },
                 onNavigateToPlaylist = { playlistId -> navController.navigate("playlist/$playlistId") { launchSingleTop = true } }
@@ -299,21 +312,21 @@ fun MusicTubeApp(
         composable("search") {
             SearchScreen(
                 onNavigateBack = { navController.popBackStack() },
-                onNavigateToPlayer = { navController.navigate("player") { launchSingleTop = true } }
+                onNavigateToPlayer = onNavigateToPlayer
             )
         }
 
         composable("quick_picks") {
             QuickPicksScreen(
                 onNavigateBack = { navController.popBackStack() },
-                onNavigateToPlayer = { navController.navigate("player") { launchSingleTop = true } }
+                onNavigateToPlayer = onNavigateToPlayer
             )
         }
 
         composable("playlist/{playlistId}") {
             PlaylistScreen(
                 onNavigateBack = { navController.popBackStack() },
-                onNavigateToPlayer = { navController.navigate("player") { launchSingleTop = true } }
+                onNavigateToPlayer = onNavigateToPlayer
             )
         }
 
@@ -327,7 +340,8 @@ fun MusicTubeApp(
             SharedPlaylistScreen(
                 playlistData = sharedPlaylistData,
                 onNavigateBack = { navController.popBackStack() },
-                onNavigateToPlayer = { navController.navigate("player") { launchSingleTop = true } }
+                onNavigateToPlayer = { navController.navigate("player") { launchSingleTop = true } },
+                onDismiss = { sharedPlaylistData = null }
             )
         }
     }
