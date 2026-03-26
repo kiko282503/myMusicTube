@@ -17,4 +17,10 @@ class DownloadsViewModel @Inject constructor(
     val downloadStatus: StateFlow<Map<String, DownloadStatus>> = downloadManager.downloadStatus
     val downloadProgress: StateFlow<Map<String, Int>> = downloadManager.downloadProgress
     val downloadErrors: StateFlow<Map<String, String>> = downloadManager.downloadErrors
+
+    /** Reset a failed download and re-enqueue it. */
+    fun retryDownload(searchResult: SearchResult) {
+        downloadManager.resetDownloadStatus(searchResult.id)
+        downloadManager.downloadSong(searchResult)
+    }
 }

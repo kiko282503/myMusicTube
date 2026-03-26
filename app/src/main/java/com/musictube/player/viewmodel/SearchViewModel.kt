@@ -91,6 +91,7 @@ class SearchViewModel @Inject constructor(
     val errorMessage: StateFlow<String?> = _errorMessage.asStateFlow()
 
     private var debounceJob: Job? = null
+    private var searchJob: Job? = null
 
     init {
         // Restore pagination cursor so load-more works immediately after restore
@@ -109,7 +110,9 @@ class SearchViewModel @Inject constructor(
                 searchMusic()
             }
         } else {
+            searchJob?.cancel()
             _searchResults.value = emptyList()
+            searchStateHolder.lastResults = emptyList()
         }
     }
 
@@ -139,7 +142,8 @@ class SearchViewModel @Inject constructor(
     }
 
     fun searchMusic() {
-        viewModelScope.launch {
+        searchJob?.cancel()
+        searchJob = viewModelScope.launch {
             if (_searchQuery.value.isBlank()) return@launch
 
             // Stop any in-progress preview before loading new results
@@ -152,6 +156,8 @@ class SearchViewModel @Inject constructor(
 
             try {
                 val (results, token) = searchService.searchMusicPaged(_searchQuery.value, songsOnly = true)
+                // If the query was cleared while this network call was in-flight, discard results
+                if (_searchQuery.value.isBlank()) return@launch
                 continuationToken = token
                 val filtered = results
                     .filter { it.itemType !in setOf("episode", "podcast") }

@@ -37,9 +37,21 @@ class HomeViewModel @Inject constructor(
         "popular tracks 2026", "viral music 2026", "current hits 2026"
     )
     private var trendingPage = 0
-    
+
+    private val allQuickPickQueries = listOf(
+        "classic rock hits", "feel good songs", "chill vibes playlist",
+        "throwback hits", "acoustic songs", "indie music favorites",
+        "road trip songs", "workout music", "relaxing music",
+        "80s greatest hits", "90s pop hits", "soft rock classics",
+        "jazz classics", "soul music favorites", "r&b hits"
+    )
+
     private fun getRandomTrendingQuery(): String {
         return allTrendingQueries.random()
+    }
+
+    private fun getRandomQuickPickQuery(): String {
+        return allQuickPickQueries.random()
     }
 
     private val _isLoading = MutableStateFlow(false)
@@ -172,11 +184,21 @@ class HomeViewModel @Inject constructor(
 
                 val distinct = results.distinctBy { it.id }
                 _trendingSongs.value = distinct
-                // Derive quick picks from the same result set — no extra network call
-                if (_quickPicks.value.isEmpty()) {
-                    _quickPicks.value = distinct.take(6)
-                }
                 trendingPage = 1
+                // Load quick picks separately with a different query so they differ from trending
+                if (_quickPicks.value.isEmpty()) {
+                    launch {
+                        try {
+                            val qpResults = searchService.searchMusic(getRandomQuickPickQuery(), songsOnly = true, maxPages = 1)
+                                .ifEmpty { searchService.searchMusic(getRandomQuickPickQuery(), songsOnly = false, maxPages = 1) }
+                            val trendingIds = distinct.map { it.id }.toHashSet()
+                            val uniquePicks = qpResults.distinctBy { it.id }.filter { it.id !in trendingIds }
+                            _quickPicks.value = uniquePicks.take(6).ifEmpty { qpResults.distinctBy { it.id }.take(6) }
+                        } catch (e: Exception) {
+                            Log.e("HomeViewModel", "Failed to load quick picks", e)
+                        }
+                    }
+                }
                 // Prefetch audio URLs for the first 20 results so inline play is instant
                 val toWarm = distinct.filter { it.isPlayable }.take(20)
                 launch(Dispatchers.IO) {
