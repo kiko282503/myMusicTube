@@ -32,6 +32,7 @@ import androidx.compose.ui.platform.LocalContext
 import coil.compose.SubcomposeAsyncImage
 import coil.request.ImageRequest
 import com.musictube.player.data.model.Playlist
+import com.musictube.player.ui.component.OemCompatBanner
 import com.musictube.player.ui.component.SearchResultItem
 import com.musictube.player.service.DownloadStatus
 import com.musictube.player.viewmodel.HomeViewModel
@@ -299,6 +300,10 @@ fun HomeScreen(
                 modifier = Modifier.fillMaxSize(),
                 contentPadding = PaddingValues(bottom = 80.dp)
             ) {
+                // OEM compatibility banner — only visible on Xiaomi/OPPO/vivo/etc.
+                // Prompts user to exempt battery optimizations and enable autostart.
+                item { OemCompatBanner() }
+
                     item {
                         Column(
                             modifier = Modifier

@@ -32,6 +32,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
+import java.util.concurrent.ConcurrentHashMap
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -291,6 +292,112 @@ class MusicPlayerManager @Inject constructor(
     private var _lastThumb: String? = null
 
     private var _webView: WebView? = null
+    // Maps videoId → direct CDN audio URL captured from WebView network requests.
+    // Used as a download fallback on devices where all innertube strategies are blocked.
+    private val _capturedWebViewAudioUrls = ConcurrentHashMap<String, String>()
+    /** Returns a CDN audio URL captured during WebView playback, or null if not yet captured. */
+    fun getCapturedAudioUrl(videoId: String): String? = _capturedWebViewAudioUrls[videoId]
+
+    // Dedicated hidden WebView used only for silent URL capture (does not affect playback).
+    private var _silentCaptureWv: WebView? = null
+    @Volatile private var _silentCaptureVideoId: String? = null
+
+    /**
+     * Silently loads a YouTube Music page in a hidden WebView to capture the audio CDN URL
+     * without playing anything audibly.  Used by DownloadManager on devices where all
+     * innertube API strategies are blocked (e.g. po_token requirement on some vivo devices).
+     * Returns the URL or null if not captured within 18 seconds.
+     */
+    @SuppressLint("SetJavaScriptEnabled")
+    suspend fun captureAudioUrlSilently(videoId: String): String? {
+        _capturedWebViewAudioUrls[videoId]?.let { return it }
+        android.util.Log.i("MusicPlayerManager", "Silent URL capture starting for $videoId")
+        return kotlinx.coroutines.withContext(Dispatchers.Main) {
+            _silentCaptureVideoId = videoId
+            val wv = _silentCaptureWv ?: run {
+                val w = WebView(context)
+                w.settings.javaScriptEnabled = true
+                w.settings.domStorageEnabled = true
+                // Keep user-gesture requirement ON so the WebView never actually plays audio.
+                // The page's JS still runs (sets video.src, triggers preload network requests)
+                // which is enough to capture the CDN URL from shouldInterceptRequest.
+                w.settings.mediaPlaybackRequiresUserGesture = true
+                w.settings.userAgentString =
+                    "Mozilla/5.0 (Linux; Android 12; Pixel 6) " +
+                    "AppleWebKit/537.36 (KHTML, like Gecko) " +
+                    "Chrome/122.0.6261.119 Mobile Safari/537.36"
+                CookieManager.getInstance().setAcceptCookie(true)
+                CookieManager.getInstance().setAcceptThirdPartyCookies(w, true)
+                w.webViewClient = object : WebViewClient() {
+                    override fun onPageStarted(view: WebView?, url: String?, favicon: android.graphics.Bitmap?) {
+                        super.onPageStarted(view, url, favicon)
+                        // Mute any media as early as possible — belt-and-suspenders against audio output
+                        view?.evaluateJavascript("""
+                            (function(){
+                              var orig = HTMLMediaElement.prototype.play;
+                              HTMLMediaElement.prototype.play = function(){
+                                this.muted = true; this.volume = 0;
+                                return orig.apply(this, arguments);
+                              };
+                              document.querySelectorAll('video,audio').forEach(function(m){
+                                m.muted=true; m.volume=0;
+                              });
+                            })();
+                        """.trimIndent(), null)
+                    }
+                    override fun onPageFinished(view: WebView?, url: String?) {
+                        super.onPageFinished(view, url)
+                        // Re-apply mute after page fully loads
+                        view?.evaluateJavascript(
+                            "document.querySelectorAll('video,audio').forEach(function(m){m.muted=true;m.volume=0;});",
+                            null)
+                    }
+                    override fun shouldInterceptRequest(
+                        view: WebView?,
+                        request: android.webkit.WebResourceRequest?
+                    ): android.webkit.WebResourceResponse? {
+                        val reqUrl = request?.url?.toString() ?: return null
+                        if (reqUrl.contains("googlevideo.com") &&
+                            (reqUrl.contains("mime=audio") || reqUrl.contains("mime%3Daudio"))) {
+                            val id = _silentCaptureVideoId
+                            if (id != null && !_capturedWebViewAudioUrls.containsKey(id)) {
+                                val clean = reqUrl.split("&")
+                                    .filter { p -> !p.startsWith("range=") && !p.startsWith("rbuf=") }
+                                    .joinToString("&")
+                                _capturedWebViewAudioUrls[id] = clean
+                                android.util.Log.i("MusicPlayerManager", "Silent capture: got URL for $id")
+                            }
+                        }
+                        return null
+                    }
+                }
+                _silentCaptureWv = w
+                w
+            }
+            wv.loadUrl("https://music.youtube.com/watch?v=$videoId&autoplay=1")
+            val result = withTimeoutOrNull(18_000L) {
+                while (_capturedWebViewAudioUrls[videoId] == null) { delay(400) }
+                _capturedWebViewAudioUrls[videoId]
+            }
+            // Stop buffering once we have the URL (or timed out) to avoid wasting data
+            wv.post { wv.loadUrl("about:blank") }
+            _silentCaptureVideoId = null
+            android.util.Log.i("MusicPlayerManager",
+                if (result != null) "Silent capture succeeded for $videoId"
+                else "Silent capture timed out for $videoId")
+            result
+        }
+    }
+
+    // True when the WebView is the active player (ExoPlayer stream extraction failed)
+    private var _isUsingWebView = false
+    // Observable version so SearchScreen can auto-navigate when WebView fallback fires.
+    private val _isUsingWebViewFlow = MutableStateFlow(false)
+    val isUsingWebViewFlow: StateFlow<Boolean> = _isUsingWebViewFlow.asStateFlow()
+    // Video ID waiting to be loaded once the WebView gains a window (attached via Activity)
+    private var _pendingWebViewVideoId: String? = null
+    /** Readable from ViewModels to guard against re-triggering stream extraction. */
+    val isUsingWebView: Boolean get() = _isUsingWebView
 
     /** Returns the singleton WebView. When called with an Activity context and the WebView
      *  is not yet in a window, attaches it to android.R.id.content (VISIBLE 1×1px) so
@@ -324,6 +431,38 @@ class MusicPlayerManager @Inject constructor(
                     super.onPageFinished(view, url)
                     injectVideoMonitor()
                 }
+                // Block ad/tracking requests so pre-roll scripts don't load
+                // (does NOT block googlevideo.com which hosts the actual audio streams)
+                override fun shouldInterceptRequest(
+                    view: WebView?,
+                    request: android.webkit.WebResourceRequest?
+                ): android.webkit.WebResourceResponse? {
+                    val url = request?.url?.toString() ?: return null
+                    // Capture audio CDN URLs from googlevideo.com for use as download fallback
+                    if (url.contains("googlevideo.com") &&
+                        (url.contains("mime=audio") || url.contains("mime%3Daudio"))) {
+                        val vid = _currentVideoId.value
+                        if (vid != null && !_capturedWebViewAudioUrls.containsKey(vid)) {
+                            // Strip range/buffer params so OkHttpDownloader can download the whole file
+                            val cleanUrl = url.split("&")
+                                .filter { p -> !p.startsWith("range=") && !p.startsWith("rbuf=") }
+                                .joinToString("&")
+                            _capturedWebViewAudioUrls[vid] = cleanUrl
+                            android.util.Log.i("MusicPlayerManager", "Captured WebView audio URL for $vid")
+                        }
+                    }
+                    if (url.contains("doubleclick.net") ||
+                        url.contains("googlesyndication.com") ||
+                        url.contains("googleadservices.com") ||
+                        url.contains("google-analytics.com") ||
+                        url.contains("googletagmanager.com") ||
+                        url.contains("pagead2.google")) {
+                        return android.webkit.WebResourceResponse(
+                            "text/plain", "utf-8",
+                            java.io.ByteArrayInputStream(ByteArray(0)))
+                    }
+                    return null
+                }
             }
             addJavascriptInterface(YouTubeInterface(), "Android")
         }.also { _webView = it }
@@ -337,9 +476,34 @@ class MusicPlayerManager @Inject constructor(
         if (contentView != null && wv.parent == null) {
             wv.visibility = android.view.View.VISIBLE
             contentView.addView(wv, android.view.ViewGroup.LayoutParams(1, 1))
-            // Page may have already loaded (URL was loaded before we had a window).
-            // Re-inject the monitor so tryPlay() runs now that we have a window token.
-            injectVideoMonitor()
+            // Reset the JS bridge flag so the video monitor re-installs cleanly on the
+            // next page load (it may have been set by a previous background-WebView load).
+            wv.post { wv.evaluateJavascript("window._ytBridgeInstalled=false;", null) }
+            // Load any deferred WebView fallback URL now that we have a window.
+            val pending = _pendingWebViewVideoId
+            if (pending != null) {
+                _pendingWebViewVideoId = null
+                _isLoadingStream.value = true  // Show loading while YouTube Music page loads
+                wv.post { wv.loadUrl("https://music.youtube.com/watch?v=$pending&autoplay=1") }
+            } else {
+                // Page may have already loaded (URL was loaded before we had a window).
+                // Re-inject the monitor so tryPlay() runs now that we have a window token.
+                injectVideoMonitor()
+            }
+        } else if (contentView != null) {
+            // WebView is already attached to this Activity window.
+            // This branch fires when LaunchedEffect(isUsingWebView) triggers a second call
+            // AFTER the pending URL was set (all innertube strategies failed ~6s after
+            // attachment). Fire the pending load now.
+            val pending = _pendingWebViewVideoId
+            if (pending != null) {
+                _pendingWebViewVideoId = null
+                _isLoadingStream.value = true
+                wv.post {
+                    wv.evaluateJavascript("window._ytBridgeInstalled=false;", null)
+                    wv.loadUrl("https://music.youtube.com/watch?v=$pending&autoplay=1")
+                }
+            }
         }
 
         return wv
@@ -366,6 +530,36 @@ class MusicPlayerManager @Inject constructor(
 
           if(window._ytBridgeInstalled) return;
           window._ytBridgeInstalled = true;
+
+          // -- Ad blocker: hide overlay ads + auto-skip video pre-rolls --
+          if (!window._ytAdBlockInstalled) {
+            window._ytAdBlockInstalled = true;
+            var s = document.createElement('style');
+            s.textContent = [
+              'ytmusic-mealbar-promo-renderer',
+              '.ytp-ad-overlay-container',
+              '.ytp-ad-message-container',
+              '.ytp-ad-text-overlay',
+              '.ytp-ce-element',
+              '#player-ads',
+              '.ytp-suggested-action'
+            ].join(',') + '{display:none!important}';
+            (document.head||document.documentElement).appendChild(s);
+            // Every 300ms: click skip button if visible, or seek past ad video
+            setInterval(function(){
+              var skip = document.querySelector(
+                '.ytp-skip-ad-button,.ytp-ad-skip-button,.ytp-ad-skip-button-slot button'
+              );
+              if (skip && skip.offsetParent !== null) { skip.click(); return; }
+              var v = document.querySelector('video');
+              if (v && v.duration && isFinite(v.duration)) {
+                var adNode = document.querySelector(
+                  '.ad-showing,.ytp-ad-simple-ad-badge,.ytp-ad-preview-container'
+                );
+                if (adNode) { v.currentTime = v.duration; }
+              }
+            }, 300);
+          }
 
           function tryPlay(v){
             if(!v||!v.paused||v.ended) return;
@@ -513,6 +707,9 @@ class MusicPlayerManager @Inject constructor(
 
         startNotificationService(title, artist, thumbnailUrl)
 
+        _pendingWebViewVideoId = null  // Cancel any pending WebView load for a previous song
+        _isUsingWebView = false
+        _isUsingWebViewFlow.value = false
         _isLoadingStream.value = true
         scope.launch {
             val audioUrl = youTubeStreamService.extractAudioUrl(videoId)
@@ -526,8 +723,29 @@ class MusicPlayerManager @Inject constructor(
                 exoPlayer.play()
                 // _isLoadingStream is cleared in onIsPlayingChanged(true)
             } else {
-                _isLoadingStream.value = false
-                android.util.Log.e("MusicPlayerManager", "Failed to extract audio URL for $videoId")
+                // All innertube strategies failed — fall back to WebView which runs real
+                // BotGuard JS and is treated as a legitimate browser by YouTube.
+                android.util.Log.i("MusicPlayerManager", "Stream extraction failed; using WebView fallback for $videoId")
+                _isUsingWebView = true
+                _isUsingWebViewFlow.value = true
+                try {
+                    val wv = getOrCreateWebView(context)
+                    if (wv.parent != null) {
+                        // WebView already has a window (user is on PlayerScreen) — load now.
+                        wv.loadUrl("https://music.youtube.com/watch?v=$videoId&autoplay=1")
+                        // _isLoadingStream cleared when onPlaying fires
+                    } else {
+                        // No window yet — defer the URL load until PlayerScreen attaches
+                        // the WebView to the Activity window via getOrCreateWebView().
+                        _pendingWebViewVideoId = videoId
+                        _isLoadingStream.value = false  // Clear spinner so icon isn't stuck
+                    }
+                } catch (e: Exception) {
+                    android.util.Log.e("MusicPlayerManager", "WebView fallback error: ${e.message}", e)
+                    _isUsingWebView = false
+                    _isUsingWebViewFlow.value = false
+                    _isLoadingStream.value = false
+                }
             }
         }
     }
@@ -538,6 +756,7 @@ class MusicPlayerManager @Inject constructor(
         fun onPlaying(durationMs: Double) {
             scope.launch {
                 _isPlaying.value = true
+                if (_isUsingWebView) _isLoadingStream.value = false
                 if (durationMs > 0 && durationMs.isFinite()) _duration.value = durationMs.toLong()
                 android.util.Log.i("MusicPlayerManager", "YouTube playing, duration=${durationMs.toLong()}ms")
             }
@@ -584,16 +803,47 @@ class MusicPlayerManager @Inject constructor(
     }
 
     fun pause() {
-        exoPlayer.pause()
+        if (_isUsingWebView) {
+            _isPlaying.value = false
+            _webView?.post {
+                _webView?.evaluateJavascript(
+                    "window._ytIntentionalPause=true; var v=document.querySelector('video'); if(v) v.pause();", null)
+            }
+        } else {
+            exoPlayer.pause()
+        }
     }
 
     fun resume() {
-        if (exoPlayer.playbackState == Player.STATE_ENDED) exoPlayer.seekTo(0)
-        exoPlayer.play()
+        if (_isUsingWebView) {
+            val pending = _pendingWebViewVideoId
+            val wv = _webView
+            if (pending != null && wv?.parent != null) {
+                // The URL was deferred and the WebView is now in a window — load it.
+                _pendingWebViewVideoId = null
+                _isLoadingStream.value = true
+                wv.loadUrl("https://music.youtube.com/watch?v=$pending&autoplay=1")
+            } else if (pending == null) {
+                _webView?.post {
+                    _webView?.evaluateJavascript(
+                        "window._ytIntentionalPause=false; var v=document.querySelector('video'); if(v&&v.paused&&!v.ended) v.play();", null)
+                }
+            }
+            // pending != null but no window yet: no-op (user needs to navigate to PlayerScreen)
+        } else {
+            if (exoPlayer.playbackState == Player.STATE_ENDED) exoPlayer.seekTo(0)
+            exoPlayer.play()
+        }
     }
 
     fun stop() {
         try {
+            _pendingWebViewVideoId = null
+            if (_isUsingWebView) {
+                _webView?.post { _webView?.loadUrl("about:blank") }
+                _isUsingWebView = false
+                _isUsingWebViewFlow.value = false
+            }
             exoPlayer.stop()
             _isPlaying.value = false
             _currentPosition.value = 0L
@@ -608,8 +858,17 @@ class MusicPlayerManager @Inject constructor(
     }
 
     fun seekTo(position: Long) {
-        exoPlayer.seekTo(position)
-        _currentPosition.value = position
+        if (_isUsingWebView) {
+            val secs = position / 1000.0
+            _webView?.post {
+                _webView?.evaluateJavascript(
+                    "var v=document.querySelector('video'); if(v) v.currentTime=$secs;", null)
+            }
+            _currentPosition.value = position
+        } else {
+            exoPlayer.seekTo(position)
+            _currentPosition.value = position
+        }
     }
 
     fun setVolume(volume: Float) {

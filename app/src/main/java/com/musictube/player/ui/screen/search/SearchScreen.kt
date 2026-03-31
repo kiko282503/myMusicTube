@@ -77,6 +77,16 @@ fun SearchScreen(
     
     var navigatingBack by remember { mutableStateOf(false) }
 
+    // On devices where all innertube strategies fail (e.g. PZDYHALZQCB6CU5L), the WebView
+    // fallback needs an Activity window to autoplay. Attach it here so audio plays in-place
+    // on SearchScreen without navigating to PlayerScreen.
+    val localContext = androidx.compose.ui.platform.LocalContext.current
+    LaunchedEffect(viewModel) {
+        viewModel.shouldAttachWebView.collect {
+            viewModel.attachWebViewToActivity(localContext)
+        }
+    }
+
     Scaffold(
         topBar = {
             TopAppBar(

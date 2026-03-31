@@ -55,6 +55,7 @@ fun PlayerScreen(
     val currentVideoId by viewModel.currentVideoId.collectAsState()
     val isPlaying by viewModel.isPlaying.collectAsState()
     val isLoadingStream by viewModel.isLoadingStream.collectAsState()
+    val isUsingWebView by viewModel.isUsingWebView.collectAsState()
     val currentPosition by viewModel.currentPosition.collectAsState()
     val duration by viewModel.duration.collectAsState()
     val downloadStatus by viewModel.currentDownloadStatus.collectAsState()
@@ -77,6 +78,13 @@ fun PlayerScreen(
     // whenever a YouTube song is active. No need to host it in Compose — GONE visibility
     // keeps it alive with audio/JS running without any view hierarchy juggling.
     if (currentVideoId != null) viewModel.getOrCreateWebView(context)
+
+    // When the WebView fallback activates (all innertube strategies failed and the coroutine
+    // sets _pendingWebViewVideoId), re-trigger getOrCreateWebView so the pending load fires
+    // even if PlayerScreen was already composed before the coroutine finished (~6 s).
+    LaunchedEffect(isUsingWebView) {
+        if (isUsingWebView) viewModel.getOrCreateWebView(context)
+    }
 
     Scaffold(
         topBar = {
@@ -141,6 +149,7 @@ fun PlayerScreen(
                         text = when {
                             isLoadingStream -> "Loading..."
                             isPlaying -> "Playing"
+                            isUsingWebView && !isPlaying -> "Loading..."
                             currentPosition == 0L -> "Stopped"
                             else -> "Paused"
                         },
@@ -148,6 +157,7 @@ fun PlayerScreen(
                         color = when {
                             isLoadingStream -> MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
                             isPlaying -> MaterialTheme.colorScheme.primary
+                            isUsingWebView && !isPlaying -> MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
                             currentPosition == 0L -> MaterialTheme.colorScheme.error
                             else -> MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
                         }

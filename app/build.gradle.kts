@@ -43,18 +43,15 @@ android {
         }
     }
     compileOptions {
-        sourceCompatibility = JavaVersion.VERSION_1_8
-        targetCompatibility = JavaVersion.VERSION_1_8
+        sourceCompatibility = JavaVersion.VERSION_11
+        targetCompatibility = JavaVersion.VERSION_11
+        isCoreLibraryDesugaringEnabled = true
     }
     kotlinOptions {
-        jvmTarget = "1.8"
+        jvmTarget = "11"
     }
     buildFeatures {
         compose = true
-    }
-    compileOptions {
-        sourceCompatibility = JavaVersion.VERSION_1_8
-        targetCompatibility = JavaVersion.VERSION_1_8
     }
     composeOptions {
         kotlinCompilerExtensionVersion = "1.5.8"
@@ -127,6 +124,9 @@ dependencies {
     
     // NewPipe Extractor - for real YouTube audio stream extraction
     implementation("com.github.TeamNewPipe:NewPipeExtractor:v0.26.0")
+
+    // Desugaring - backports Java 10+ APIs (e.g. URLDecoder.decode(String, Charset)) to Android 11
+    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.0.4")
     
     testImplementation("junit:junit:4.13.2")
     androidTestImplementation("androidx.test.ext:junit:1.1.5")

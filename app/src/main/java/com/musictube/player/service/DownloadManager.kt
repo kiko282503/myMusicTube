@@ -37,7 +37,8 @@ class DownloadManager @Inject constructor(
     private val downloader: OkHttpDownloader,
     private val youTubeStreamService: YouTubeStreamService,
     private val searchService: SearchService,
-    private val musicRepository: MusicRepository
+    private val musicRepository: MusicRepository,
+    private val playerManager: MusicPlayerManager
 ) {
     // Counts downloads that are queued or running; used to start/stop the foreground service.
     private val activeDownloadCount = AtomicInteger(0)
@@ -114,7 +115,15 @@ class DownloadManager @Inject constructor(
                         }
                     }
                 }
-                if (audioUrl == null) throw IllegalStateException("Could not extract downloadable audio URL after retries. YouTube may be rate-limiting — please wait a moment and try again.")
+                // Last resort: use a CDN URL captured when the user previously played this
+                // song via the WebView fallback (works on devices where innertube is blocked).
+                if (audioUrl == null) {
+                    audioUrl = playerManager.getCapturedAudioUrl(searchResult.id)
+                    if (audioUrl != null)
+                        Log.i("DownloadManager", "Using captured WebView audio URL for ${searchResult.id}")
+                }
+                if (audioUrl == null) throw IllegalStateException(
+                    "Download failed. Please check your connection and try again.")
 
                 Log.d("DownloadManager", "Downloading audio from: $audioUrl")
 
@@ -213,6 +222,16 @@ class DownloadManager @Inject constructor(
                     Log.d("DownloadManager", "Found alternate audio for ${searchResult.id} using ${candidate.id} (${candidate.artist} - ${candidate.title})")
                     return@withContext alt
                 }
+            }
+
+            // Last resort: silently load the YouTube Music page in a hidden WebView to capture
+            // the audio CDN URL directly from the WebView's network traffic.
+            // This works on devices where YouTube blocks all innertube API calls (po_token).
+            Log.i("DownloadManager", "All API strategies failed for ${searchResult.id} — trying silent WebView capture")
+            val silentUrl = playerManager.captureAudioUrlSilently(searchResult.id)
+            if (silentUrl != null) {
+                Log.i("DownloadManager", "Silent WebView capture succeeded for ${searchResult.id}")
+                return@withContext silentUrl
             }
 
             Log.w("DownloadManager", "Could not extract audio URL for ${searchResult.id}")

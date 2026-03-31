@@ -244,9 +244,9 @@ fun SearchResultItem(
                                     tint = MaterialTheme.colorScheme.error
                                 )
                             }
-                            if (downloadError != null && downloadError.contains("rate", ignoreCase = true)) {
+                            if (downloadError != null) {
                                 Text(
-                                    text = "Rate limited",
+                                    text = "Failed — tap to retry",
                                     style = MaterialTheme.typography.labelSmall,
                                     color = MaterialTheme.colorScheme.error,
                                     maxLines = 1

@@ -169,18 +169,21 @@ class HomeViewModel @Inject constructor(
         viewModelScope.launch {
             _isLoading.value = true
             try {
-                // Try the YT Music home feed browse API first — same source as the real app
-                var results = searchService.fetchHomeFeed()
-
-                // Fall back to a search query if the browse API returns nothing
-                if (results.isEmpty()) {
-                    val songOnlyResults = searchService.searchMusic(getRandomTrendingQuery(), songsOnly = true, maxPages = 1)
-                    results = if (songOnlyResults.isNotEmpty()) {
-                        songOnlyResults
-                    } else {
-                        searchService.searchMusic(getRandomTrendingQuery(), songsOnly = false, maxPages = 1)
+                // Race home-feed browse API against a search query in parallel — show whichever responds first
+                val trendingQuery = getRandomTrendingQuery()
+                val results = channelFlow<List<SearchResult>> {
+                    launch(Dispatchers.IO) {
+                        val r = try { searchService.fetchHomeFeed() } catch (e: Exception) { emptyList() }
+                        if (r.isNotEmpty()) send(r)
                     }
-                }
+                    launch(Dispatchers.IO) {
+                        val r = try {
+                            searchService.searchMusic(trendingQuery, songsOnly = true, maxPages = 1)
+                                .ifEmpty { searchService.searchMusic(trendingQuery, songsOnly = false, maxPages = 1) }
+                        } catch (e: Exception) { emptyList() }
+                        if (r.isNotEmpty()) send(r)
+                    }
+                }.firstOrNull() ?: emptyList()
 
                 val distinct = results.distinctBy { it.id }
                 _trendingSongs.value = distinct

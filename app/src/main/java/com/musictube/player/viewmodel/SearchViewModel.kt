@@ -17,10 +17,13 @@ import com.musictube.player.service.YouTubeStreamService
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -90,6 +93,12 @@ class SearchViewModel @Inject constructor(
     private val _errorMessage = MutableStateFlow<String?>(null)
     val errorMessage: StateFlow<String?> = _errorMessage.asStateFlow()
 
+    // Fired (once) when the WebView fallback activates for a search result so SearchScreen
+    // can attach the WebView to the Activity window — letting audio play in-place on
+    // SearchScreen without navigating away.
+    private val _shouldAttachWebView = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
+    val shouldAttachWebView: SharedFlow<Unit> = _shouldAttachWebView
+
     private var debounceJob: Job? = null
     private var searchJob: Job? = null
 
@@ -97,6 +106,22 @@ class SearchViewModel @Inject constructor(
         // Restore pagination cursor so load-more works immediately after restore
         continuationToken = searchStateHolder.continuationToken
         _canLoadMore.value = searchStateHolder.canLoadMore
+
+        // When WebView fallback fires for a song that came from search results,
+        // signal the UI to navigate to PlayerScreen so the WebView gets its window
+        // and audio actually starts — same end-result as ExoPlayer direct-stream.
+        viewModelScope.launch {
+            combine(
+                playerManager.isUsingWebViewFlow,
+                playerManager.currentVideoId
+            ) { usingWebView, videoId -> usingWebView to videoId }
+                .collect { (usingWebView, videoId) ->
+                    if (usingWebView && videoId != null &&
+                            _searchResults.value.any { it.id == videoId }) {
+                        _shouldAttachWebView.emit(Unit)
+                    }
+                }
+        }
     }
 
     fun updateSearchQuery(query: String) {
@@ -190,16 +215,23 @@ class SearchViewModel @Inject constructor(
         }
     }
 
+    /** Attach the WebView to [context] (must be an Activity) so a pending video starts playing. */
+    fun attachWebViewToActivity(context: android.content.Context) {
+        playerManager.getOrCreateWebView(context)
+    }
+
     fun playSearchResult(searchResult: SearchResult) {
         if (!searchResult.isPlayable) {
             _errorMessage.value = "This item cannot be played directly"
             return
         }
 
-        // If this song is already playing or loading (e.g. via preview), just navigate
-        // to the player without restarting — let it continue from where it is.
+        // If this song is already playing, loading, or being handled by the WebView fallback,
+        // just navigate to the player without restarting — let it continue from where it is.
         val alreadyCurrent = playerManager.currentVideoId.value == searchResult.id
-        val activeStream = playerManager.isPlaying.value || playerManager.isLoadingStream.value
+        val activeStream = playerManager.isPlaying.value
+                        || playerManager.isLoadingStream.value
+                        || playerManager.isUsingWebView
         if (alreadyCurrent && activeStream) return
 
         playerManager.playYouTubeAudioStream(
@@ -213,11 +245,14 @@ class SearchViewModel @Inject constructor(
     /** Play or pause a preview of [searchResult] inline without navigating to the player page. */
     fun togglePreview(searchResult: SearchResult) {
         if (!searchResult.isPlayable) return
+        val isCurrent = playerManager.currentVideoId.value == searchResult.id
         when {
-            playerManager.currentVideoId.value == searchResult.id && playerManager.isPlaying.value -> {
+            isCurrent && playerManager.isPlaying.value -> {
                 playerManager.pause()
             }
-            playerManager.currentVideoId.value == searchResult.id && !playerManager.isPlaying.value -> {
+            // If the WebView fallback is active but awaiting a window, resume() will trigger
+            // the load once the WebView has a window (i.e., when user navigates to PlayerScreen).
+            isCurrent && !playerManager.isPlaying.value -> {
                 playerManager.resume()
             }
             else -> {

@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="utf-8"?>
+<network-security-config>
+    <!--
+        OEM Compatibility (vivo FuntouchOS, OPPO ColorOS, Xiaomi MIUI/HyperOS):
+        - Trust both system and user-installed CAs so OEM-injected root certificates
+          (common on Xiaomi/OPPO enterprise builds) are accepted.
+        - Cleartext HTTP is blocked — all YouTube/search connections use HTTPS only.
+        - Explicit trust-anchors prevent OEM custom TLS stacks from silently dropping
+          connections for unrecognised certificates.
+    -->
+    <base-config cleartextTrafficPermitted="false">
+        <trust-anchors>
+            <!-- Standard system CAs (includes OEM pre-installed roots) -->
+            <certificates src="system" />
+            <!-- User-installed CAs — needed on some OEM builds with custom enterprise roots -->
+            <certificates src="user" />
+        </trust-anchors>
+    </base-config>
+
+    <!-- YouTube and Google APIs — explicitly permit these domains -->
+    <domain-config cleartextTrafficPermitted="false">
+        <domain includeSubdomains="true">youtube.com</domain>
+        <domain includeSubdomains="true">googlevideo.com</domain>
+        <domain includeSubdomains="true">googleapis.com</domain>
+        <domain includeSubdomains="true">ytimg.com</domain>
+        <trust-anchors>
+            <certificates src="system" />
+            <certificates src="user" />
+        </trust-anchors>
+    </domain-config>
+</network-security-config>

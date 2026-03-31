@@ -7,6 +7,7 @@
     <uses-permission android:name="android.permission.READ_MEDIA_AUDIO" />
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
@@ -15,7 +16,11 @@
     
     <!-- For audio focus -->
     <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
-    
+
+    <!-- Keeps playback alive on OEM ROMs (vivo/OPPO/Xiaomi) that kill background apps -->
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+
     <!-- For storage access on newer Android versions -->
     <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE"
         tools:ignore="ScopedStorage" />
@@ -31,6 +36,7 @@
         android:supportsRtl="true"
         android:theme="@style/Theme.MusicTube"
         android:requestLegacyExternalStorage="true"
+        android:networkSecurityConfig="@xml/network_security_config"
         tools:targetApi="31">
         
         <!-- Main Activity -->
@@ -85,10 +91,12 @@
         </activity>
         
         <!-- Music Player Foreground Service (shows mini-player notification) -->
+        <!-- stopWithTask=false keeps the service alive when app is swiped from recents on OEM ROMs -->
         <service
             android:name=".service.MusicPlayerService"
             android:enabled="true"
             android:exported="false"
+            android:stopWithTask="false"
             android:foregroundServiceType="mediaPlayback" />
 
         <!-- Download Foreground Service (keeps downloads alive when screen is locked) -->
@@ -115,6 +123,23 @@
             android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.MEDIA_BUTTON" />
+            </intent-filter>
+        </receiver>
+
+        <!--
+            Boot Receiver — restarts app state after device reboot.
+            Required on Xiaomi (MIUI/HyperOS), OPPO (ColorOS) and vivo (FuntouchOS)
+            which do NOT auto-restart services that were running before shutdown.
+            android:exported="true" is mandatory for BOOT_COMPLETED on API 33+.
+        -->
+        <receiver
+            android:name=".BootReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <!-- vivo fast-boot (powers on without full shutdown cycle) -->
+                <action android:name="android.intent.action.QUICKBOOT_POWERON" />
+                <category android:name="android.intent.category.DEFAULT" />
             </intent-filter>
         </receiver>
         

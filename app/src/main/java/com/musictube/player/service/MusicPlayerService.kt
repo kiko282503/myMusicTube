@@ -5,8 +5,10 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
+import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.media.AudioAttributes
@@ -46,6 +48,18 @@ class MusicPlayerService : Service() {
     private var monitorJob: Job? = null
     private var cachedArt: Bitmap? = null
     private var cachedArtUrl: String? = null
+
+    // Pause playback when headphones are unplugged (important on vivo/OPPO/Xiaomi)
+    private val noisyReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            if (intent?.action == AudioManager.ACTION_AUDIO_BECOMING_NOISY) {
+                if (playerManager.isPlaying.value) {
+                    playerManager.pause()
+                    updateNotificationPlayState(isPlaying = false)
+                }
+            }
+        }
+    }
 
     companion object {
         const val CHANNEL_ID = "music_channel"
@@ -131,6 +145,13 @@ class MusicPlayerService : Service() {
                 AudioManager.AUDIOFOCUS_GAIN
             )
         }
+
+        // Register BECOMING_NOISY receiver — pauses when headphones are unplugged.
+        // OEM ROMs (vivo/OPPO/Xiaomi) do not always handle this automatically.
+        registerReceiver(
+            noisyReceiver,
+            IntentFilter(AudioManager.ACTION_AUDIO_BECOMING_NOISY)
+        )
 
         mediaSession = MediaSessionCompat(this, "MusicTube").apply {
             setFlags(
@@ -411,7 +432,22 @@ class MusicPlayerService : Service() {
 
     override fun onBind(intent: Intent?): IBinder? = null
 
+    /**
+     * Called when the user removes the app from recents.
+     * On stock Android the service would stop, but on vivo/OPPO/Xiaomi the system
+     * calls this *before* killing the process — restart the service so playback survives.
+     * The service declaration has android:stopWithTask="false" which prevents the
+     * system from stopping it automatically; this override ensures it also restarts
+     * if it does get killed.
+     */
+    override fun onTaskRemoved(rootIntent: Intent?) {
+        super.onTaskRemoved(rootIntent)
+        val restartIntent = Intent(applicationContext, MusicPlayerService::class.java)
+        startService(restartIntent)
+    }
+
     override fun onDestroy() {
+        try { unregisterReceiver(noisyReceiver) } catch (_: Exception) {}
         thumbnailJob?.cancel()
         scope.cancel()
         mediaSession.release()

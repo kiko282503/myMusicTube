@@ -14,6 +14,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.stateIn
@@ -31,6 +32,7 @@ class PlayerViewModel @Inject constructor(
     val currentVideoId: StateFlow<String?> = playerManager.currentVideoId
     val isPlaying: StateFlow<Boolean> = playerManager.isPlaying
     val isLoadingStream: StateFlow<Boolean> = playerManager.isLoadingStream
+    val isUsingWebView: StateFlow<Boolean> = playerManager.isUsingWebViewFlow
     val currentPosition: StateFlow<Long> = playerManager.currentPosition
     val duration: StateFlow<Long> = playerManager.duration
     val volume: StateFlow<Float> = playerManager.volume
@@ -63,16 +65,39 @@ class PlayerViewModel @Inject constructor(
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
 
     init {
-        // Sync download-status indicator whenever the active song changes.
-        // We always check the DB because the transient Song object created by
-        // playYouTubeAudioStream() has isDownloaded = false by default.
+        // Sync download-status indicator whenever the active song or DownloadManager status changes.
+        // Checks DownloadManager first (catches in-progress downloads started from SearchScreen),
+        // then falls back to the DB (catches songs marked completed in a previous session).
         viewModelScope.launch {
-            currentSong.collect { song ->
-                if (song != null) {
-                    val dbSong = musicRepository.getSongById(song.id)
+            combine(currentVideoId, downloadManager.downloadStatus) { videoId, dmStatus ->
+                videoId to dmStatus
+            }.collect { (videoId, dmStatus) ->
+                if (videoId == null) return@collect
+                val dmEntry = dmStatus[videoId]
+                if (dmEntry != null) {
+                    // DownloadManager has a live entry — use it directly
+                    if (_currentDownloadStatus.value != DownloadStatus.COMPLETED) {
+                        _currentDownloadStatus.value = dmEntry
+                        if (dmEntry == DownloadStatus.DOWNLOADING) {
+                            _currentDownloadProgress.value =
+                                downloadManager.downloadProgress.value[videoId] ?: 0
+                        }
+                    }
+                } else {
+                    // No live entry — check the DB
+                    val dbSong = musicRepository.getSongById("yt_$videoId")
                     _currentDownloadStatus.value =
-                        if (song.isDownloaded || dbSong?.isDownloaded == true) DownloadStatus.COMPLETED
-                        else DownloadStatus.IDLE
+                        if (dbSong?.isDownloaded == true) DownloadStatus.COMPLETED else DownloadStatus.IDLE
+                }
+            }
+        }
+        // Also track download progress separately for the current video
+        viewModelScope.launch {
+            combine(currentVideoId, downloadManager.downloadProgress) { videoId, prog ->
+                videoId to prog
+            }.collect { (videoId, prog) ->
+                if (videoId != null && _currentDownloadStatus.value == DownloadStatus.DOWNLOADING) {
+                    _currentDownloadProgress.value = prog[videoId] ?: _currentDownloadProgress.value
                 }
             }
         }
