@@ -29,4 +29,4 @@ actual fun platformDeleteFile(path: String) {
     } catch (_: Exception) { }
 }
 
-actual fun platformUuid(): String = NSUUID().uUIDString
+actual fun platformUuid(): String = NSUUID().description
