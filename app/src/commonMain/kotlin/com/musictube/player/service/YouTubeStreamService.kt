@@ -16,6 +16,8 @@ import kotlinx.coroutines.IO
 import kotlinx.coroutines.flow.channelFlow
 import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.*
 
@@ -27,8 +29,8 @@ class YouTubeStreamService {
         fun isValid() = currentTimeMillis() - fetchedAt < 5 * 60 * 60 * 1000L
     }
 
-    @Volatile private var urlCache: Map<String, CachedUrl> = emptyMap()
-    private val urlCacheLock = Any()
+    @kotlin.concurrent.Volatile private var urlCache: Map<String, CachedUrl> = emptyMap()
+    private val urlCacheMutex = Mutex()
 
     private val httpClient = HttpClient { engine { } }
     private val json = Json { ignoreUnknownKeys = true }
@@ -44,7 +46,7 @@ class YouTubeStreamService {
             launch(Dispatchers.IO) { fetchWithPiped(videoId)?.let { send(it) } }
             launch(Dispatchers.IO) { fetchWithInvidious(videoId)?.let { send(it) } }
         }.firstOrNull()
-        result?.let { url -> synchronized(urlCacheLock) { urlCache = urlCache + (videoId to CachedUrl(url)) } }
+        result?.let { url -> urlCacheMutex.withLock { urlCache = urlCache + (videoId to CachedUrl(url)) } }
         return result
     }
 

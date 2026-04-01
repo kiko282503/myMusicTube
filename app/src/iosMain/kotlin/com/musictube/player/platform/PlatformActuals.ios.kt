@@ -1,3 +1,5 @@
+@file:OptIn(kotlinx.cinterop.ExperimentalForeignApi::class)
+
 package com.musictube.player.platform
 
 import platform.Foundation.NSDate
@@ -27,4 +29,4 @@ actual fun platformDeleteFile(path: String) {
     } catch (_: Exception) { }
 }
 
-actual fun platformUuid(): String = NSUUID().uuidString
+actual fun platformUuid(): String = NSUUID().uUIDString

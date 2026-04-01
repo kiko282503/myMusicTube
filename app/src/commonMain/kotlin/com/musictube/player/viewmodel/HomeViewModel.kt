@@ -20,6 +20,8 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 
 class HomeViewModel(
     private val musicRepository: MusicRepository,
@@ -134,10 +136,11 @@ class HomeViewModel(
             try {
                 val queries = allTrendingQueries.shuffled().take(3)
                 val results = mutableListOf<SearchResult>()
+                val resultsMutex = Mutex()
                 queries.forEach { q ->
                     launch(Dispatchers.Default) {
                         val r = searchService.searchMusic(q, maxPages = 1)
-                        synchronized(results) { results.addAll(r) }
+                        resultsMutex.withLock { results.addAll(r) }
                     }
                 }
                 val merged = (_trendingSongs.value + results).distinctBy { it.id }
