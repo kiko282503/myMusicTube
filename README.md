@@ -1,5 +1,7 @@
 # MusicTube - Ad-Free Music Player
 
+[![CI](https://github.com/kiko282503/myMusicTube/actions/workflows/ci.yml/badge.svg)](https://github.com/kiko282503/myMusicTube/actions/workflows/ci.yml)
+
 MusicTube is a modern Android music player app built with Kotlin and Jetpack Compose. It provides local music playback capabilities and online music search functionality, similar to Mixtube but without ads.
 
 ## Features
