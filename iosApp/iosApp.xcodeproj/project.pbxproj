@@ -152,7 +152,7 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
-			shellScript = "cd \"$SRCROOT/..\"\n./gradlew :app:embedAndSignAppleFrameworkForXcode\n";
+			shellScript = "# In CI the framework is pre-built and staged by the workflow.\n[ \"$CI_BUILD_PHASE_SKIP\" = \"YES\" ] && { echo 'Skipping KMP build (pre-built in CI).'; exit 0; }\ncd \"$SRCROOT/..\"\n./gradlew :app:embedAndSignAppleFrameworkForXcode\n";
 		};
 /* End PBXShellScriptBuildPhase section */
 

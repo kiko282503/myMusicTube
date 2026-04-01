@@ -106,29 +106,28 @@ jobs:
           echo "Simulator UDID: $UDID"
           xcrun simctl list devices | grep "$UDID"
 
-      # Pre-build the KMP framework so it lands in the directory that
-      # FRAMEWORK_SEARCH_PATHS in project.pbxproj points to:
-      #   app/build/xcode-frameworks/Debug/iphonesimulator/ComposeApp.framework
-      #
-      # KEY: embedAndSignAppleFrameworkForXcode needs TARGET_BUILD_DIR +
-      # FRAMEWORKS_FOLDER_PATH to know the copy destination.  When called outside
-      # of Xcode (i.e. directly from the CI shell) those vars are not set, so we
-      # supply them manually.  Setting FRAMEWORKS_FOLDER_PATH to "" (empty) tells
-      # the task to copy ComposeApp.framework directly into TARGET_BUILD_DIR,
-      # which we point at the xcode-frameworks tree.
-      - name: Pre-build KMP framework for Simulator
-        env:
-          CONFIGURATION: Debug
-          SDK_NAME: iphonesimulator
-          ARCHS: arm64
-          EXPANDED_CODE_SIGN_IDENTITY: ""
-          EXPANDED_CODE_SIGN_IDENTITY_NAME: ""
-          TARGET_BUILD_DIR: ${{ github.workspace }}/app/build/xcode-frameworks/Debug/iphonesimulator
-          FRAMEWORKS_FOLDER_PATH: ""
-        run: ./gradlew :app:embedAndSignAppleFrameworkForXcode --stacktrace
+      # 1. Build the KMP framework binary for the iOS Simulator (no Xcode env vars needed).
+      #    Output lands at: app/build/bin/iosSimulatorArm64/debugFramework/ComposeApp.framework
+      - name: Build KMP framework for Simulator
+        run: ./gradlew :app:linkDebugFrameworkIosSimulatorArm64 --stacktrace
 
-      - name: Build iOS app (xcodebuild, no code signing)
+      # 2. Stage the framework where FRAMEWORK_SEARCH_PATHS in the Xcode project expects it.
+      #    We skip the Xcode "Build KMP Framework" script phase in the next step
+      #    (CI_BUILD_PHASE_SKIP=YES) so this manual copy is the only copy needed.
+      - name: Stage framework at FRAMEWORK_SEARCH_PATHS location
         run: |
+          mkdir -p app/build/xcode-frameworks/Debug/iphonesimulator
+          cp -R \
+            app/build/bin/iosSimulatorArm64/debugFramework/ComposeApp.framework \
+            app/build/xcode-frameworks/Debug/iphonesimulator/ComposeApp.framework
+
+      # 3. Build the Xcode project.
+      #    CI_BUILD_PHASE_SKIP=YES is passed so the "Build KMP Framework" script phase
+      #    exits immediately (guard added in project.pbxproj) instead of re-running Gradle.
+      #    set -o pipefail ensures xcodebuild failures propagate through the tee pipe.
+      - name: Build iOS app (xcodebuild)
+        run: |
+          set -o pipefail
           xcodebuild build \
             -project iosApp/iosApp.xcodeproj \
             -scheme iosApp \
@@ -139,7 +138,8 @@ jobs:
             CODE_SIGNING_IDENTITY="" \
             CODE_SIGN_ENTITLEMENTS="" \
             COMPILER_INDEX_STORE_ENABLE=NO \
-            2>&1 | tail -80
+            CI_BUILD_PHASE_SKIP=YES \
+            2>&1 | tee /tmp/xcodebuild.log | tail -200
 
       # ── Run on Simulator ──────────────────────────────────────────────────────
       - name: Boot simulator
