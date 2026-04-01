@@ -18,7 +18,7 @@ val androidModule = module {
     single { YouTubeAudioExtractor() }
     single { LocalAudioManager(get<Context>()) }
 
-    single<AudioPlayerController> {
+    single {
         MusicPlayerManager(
             context = get(),
             audioExtractor = get(),
@@ -26,6 +26,7 @@ val androidModule = module {
             youTubeStreamService = get()
         )
     }
+    single<AudioPlayerController> { get<MusicPlayerManager>() }
 
     single<DownloadController> {
         AndroidDownloadManager(
