@@ -1,0 +1,129 @@
+-- ─── Schema ───────────────────────────────────────────────────────────────────
+
+CREATE TABLE IF NOT EXISTS songs (
+    id           TEXT    NOT NULL PRIMARY KEY,
+    title        TEXT    NOT NULL,
+    artist       TEXT    NOT NULL,
+    album        TEXT,
+    duration     INTEGER NOT NULL DEFAULT 0,
+    filePath     TEXT,
+    url          TEXT,
+    thumbnailUrl TEXT,
+    isLocal      INTEGER NOT NULL DEFAULT 1,
+    isDownloaded INTEGER NOT NULL DEFAULT 0,
+    dateAdded    INTEGER NOT NULL,
+    playCount    INTEGER NOT NULL DEFAULT 0,
+    isLiked      INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS playlists (
+    id           TEXT    NOT NULL PRIMARY KEY,
+    name         TEXT    NOT NULL,
+    description  TEXT,
+    thumbnailUrl TEXT,
+    dateCreated  INTEGER NOT NULL,
+    songCount    INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS playlist_songs (
+    playlistId TEXT    NOT NULL REFERENCES playlists(id) ON DELETE CASCADE,
+    songId     TEXT    NOT NULL REFERENCES songs(id)     ON DELETE CASCADE,
+    position   INTEGER NOT NULL DEFAULT 0,
+    dateAdded  INTEGER NOT NULL,
+    PRIMARY KEY (playlistId, songId)
+);
+
+-- ─── Songs ────────────────────────────────────────────────────────────────────
+
+getAllSongs:
+SELECT * FROM songs ORDER BY dateAdded DESC;
+
+getDownloadedSongs:
+SELECT * FROM songs WHERE isDownloaded = 1;
+
+getLikedSongs:
+SELECT * FROM songs WHERE isLiked = 1;
+
+getSongById:
+SELECT * FROM songs WHERE id = ?;
+
+searchSongs:
+SELECT * FROM songs
+WHERE title  LIKE :query
+   OR artist LIKE :query
+   OR album  LIKE :query;
+
+insertSong:
+INSERT OR REPLACE INTO songs
+    (id, title, artist, album, duration, filePath, url, thumbnailUrl,
+     isLocal, isDownloaded, dateAdded, playCount, isLiked)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+
+updateLikedStatus:
+UPDATE songs SET isLiked = ? WHERE id = ?;
+
+updateDownloadedStatus:
+UPDATE songs SET isDownloaded = ?, filePath = ? WHERE id = ?;
+
+incrementPlayCount:
+UPDATE songs SET playCount = playCount + 1 WHERE id = ?;
+
+deleteSong:
+DELETE FROM songs WHERE id = ?;
+
+-- ─── Playlists ────────────────────────────────────────────────────────────────
+
+getAllPlaylists:
+SELECT * FROM playlists ORDER BY dateCreated DESC;
+
+getPlaylistById:
+SELECT * FROM playlists WHERE id = ?;
+
+getPlaylistByName:
+SELECT * FROM playlists WHERE name = ?;
+
+insertPlaylist:
+INSERT OR REPLACE INTO playlists
+    (id, name, description, thumbnailUrl, dateCreated, songCount)
+VALUES (?, ?, ?, ?, ?, ?);
+
+updatePlaylist:
+UPDATE playlists SET name = ?, description = ?, thumbnailUrl = ?, songCount = ?
+WHERE id = ?;
+
+deletePlaylist:
+DELETE FROM playlists WHERE id = ?;
+
+clearPlaylist:
+DELETE FROM playlist_songs WHERE playlistId = ?;
+
+-- ─── Playlist Songs ───────────────────────────────────────────────────────────
+
+getPlaylistSongs:
+SELECT s.*
+FROM songs s
+INNER JOIN playlist_songs ps ON s.id = ps.songId
+WHERE ps.playlistId = ?
+ORDER BY ps.position;
+
+insertPlaylistSong:
+INSERT OR IGNORE INTO playlist_songs (playlistId, songId, position, dateAdded)
+VALUES (?, ?, ?, ?);
+
+deletePlaylistSong:
+DELETE FROM playlist_songs WHERE playlistId = ? AND songId = ?;
+
+getPlaylistSongCount:
+SELECT COUNT(*) FROM playlist_songs WHERE playlistId = ?;
+
+getMaxPositionInPlaylist:
+SELECT MAX(position) FROM playlist_songs WHERE playlistId = ?;
+
+isSongInPlaylist:
+SELECT COUNT(*) FROM playlist_songs WHERE playlistId = ? AND songId = ?;
+
+isSongInAnyPlaylist:
+SELECT COUNT(*) FROM playlist_songs WHERE songId = ?;
+
+updatePlaylistSongCount:
+UPDATE playlists SET songCount = ? WHERE id = ?;

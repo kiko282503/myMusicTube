@@ -71,3 +71,18 @@ lint/intermediates/
 lint/generated/
 lint/outputs/
 lint/tmp/
+
+# iOS / Xcode
+iosApp/build/
+iosApp/*.xcodeproj/xcuserdata/
+iosApp/*.xcworkspace/xcuserdata/
+iosApp/*.xcworkspace/xcshareddata/swiftpm/
+DerivedData/
+*.xccheckout
+*.moved-aside
+*.xcuserstate
+*.xcscmblueprint
+Pods/
+
+# Kotlin/Native
+.konan/

@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.MusicTube" parent="android:Theme.Material.NoActionBar">
+        <!-- Primary brand color (vibrant purple) -->
+        <item name="android:colorPrimary">@color/music_primary</item>
+        <item name="android:colorAccent">@color/music_primary_variant</item>
+
+        <!-- Background colors (deep dark purple-black) -->
+        <item name="android:colorBackground">@color/music_background</item>
+
+        <!-- Status / nav bar — pale lavender matching background -->
+        <item name="android:statusBarColor">@color/music_background</item>
+        <item name="android:navigationBarColor">@color/music_background</item>
+        <item name="android:windowLightStatusBar">true</item>
+        <item name="android:windowLightNavigationBar">true</item>
+    </style>
+</resources>

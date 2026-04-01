@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="black">#FF000000</color>
+    <color name="white">#FFFFFFFF</color>
+    <!-- Light purple music theme -->
+    <color name="music_primary">#FF7C3AED</color>
+    <color name="music_primary_variant">#FF9D5CF6</color>
+    <color name="music_secondary">#FFE8DAFF</color>
+    <color name="music_background">#FFF0E8FF</color>
+    <color name="music_surface">#FFE8DAFF</color>
+    <color name="music_primary_container">#FFD8B4FE</color>
+    <color name="music_on_background">#FF1E0643</color>
+</resources>

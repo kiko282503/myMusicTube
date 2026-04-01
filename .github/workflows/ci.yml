@@ -1,0 +1,232 @@
+name: CI
+
+on:
+  push:
+    branches: [ main, master, develop ]
+  pull_request:
+    branches: [ main, master, develop ]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ── Android build & unit tests ───────────────────────────────────────────────
+  android:
+    name: Android (APK + Tests)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+
+      - name: Cache Gradle caches
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: gradle-${{ runner.os }}-${{ hashFiles('**/*.gradle.kts', 'gradle/wrapper/gradle-wrapper.properties') }}
+          restore-keys: gradle-${{ runner.os }}-
+
+      - name: Grant execute permission for gradlew
+        run: chmod +x gradlew
+
+      - name: Run unit tests
+        run: ./gradlew :app:testDebugUnitTest --stacktrace
+
+      - name: Build debug APK
+        run: ./gradlew :app:assembleDebug --stacktrace
+
+      - name: Upload debug APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-debug
+          path: app/build/outputs/apk/debug/app-debug.apk
+          retention-days: 7
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-test-results
+          path: app/build/reports/tests/
+          retention-days: 7
+
+  # ── iOS build + run on Simulator ──────────────────────────────────────────────
+  ios:
+    name: iOS App (Run on Simulator)
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+
+      - name: Cache Gradle & Konan caches
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+            ~/.konan
+          key: gradle-macos-${{ hashFiles('**/*.gradle.kts', 'gradle/wrapper/gradle-wrapper.properties') }}
+          restore-keys: gradle-macos-
+
+      - name: Grant execute permission for gradlew
+        run: chmod +x gradlew
+
+      # Resolve the UDID of the first available iPhone simulator on this runner.
+      - name: Resolve simulator UDID
+        id: sim
+        run: |
+          UDID=$(xcrun simctl list devices available -j | python3 -c "
+          import json, sys
+          data = json.load(sys.stdin)
+          for runtime, devices in data['devices'].items():
+              if 'iOS' in runtime:
+                  for d in devices:
+                      if 'iPhone' in d['name'] and d.get('isAvailable', False):
+                          print(d['udid'])
+                          sys.exit(0)
+          sys.exit(1)
+          ")
+          echo "udid=$UDID" >> "$GITHUB_OUTPUT"
+          echo "Simulator UDID: $UDID"
+          xcrun simctl list devices | grep "$UDID"
+
+      # Pre-build the KMP framework with the correct env vars that Xcode would
+      # normally pass to the "Build KMP Framework" script build phase.
+      - name: Build KMP framework for Simulator
+        env:
+          CONFIGURATION: Debug
+          SDK_NAME: iphonesimulator
+          ARCHS: arm64
+          EXPANDED_CODE_SIGN_IDENTITY: ""
+          EXPANDED_CODE_SIGN_IDENTITY_NAME: ""
+        run: ./gradlew :app:embedAndSignAppleFrameworkForXcode --stacktrace
+
+      - name: Build iOS app (xcodebuild, no code signing)
+        run: |
+          xcodebuild build \
+            -project iosApp/iosApp.xcodeproj \
+            -scheme iosApp \
+            -configuration Debug \
+            -destination "platform=iOS Simulator,id=${{ steps.sim.outputs.udid }}" \
+            -derivedDataPath build/ios-derived \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_IDENTITY="" \
+            CODE_SIGN_ENTITLEMENTS="" \
+            COMPILER_INDEX_STORE_ENABLE=NO \
+            2>&1 | tail -80
+
+      # ── Run on Simulator ──────────────────────────────────────────────────────
+      - name: Boot simulator
+        run: |
+          xcrun simctl boot "${{ steps.sim.outputs.udid }}" || true
+          # Poll until the simulator reports Booted (up to 60 s)
+          for i in $(seq 1 30); do
+            STATUS=$(xcrun simctl list devices | grep "${{ steps.sim.outputs.udid }}" | grep -o "Booted" || true)
+            [ "$STATUS" = "Booted" ] && break
+            sleep 2
+          done
+          echo "Simulator state:"
+          xcrun simctl list devices | grep "${{ steps.sim.outputs.udid }}"
+
+      - name: Install app on simulator
+        run: |
+          xcrun simctl install \
+            "${{ steps.sim.outputs.udid }}" \
+            "build/ios-derived/Build/Products/Debug-iphonesimulator/iosApp.app"
+
+      - name: Launch app and verify it does not crash
+        run: |
+          # Timestamp used to detect crash reports created after this point
+          touch /tmp/before_launch
+
+          xcrun simctl launch "${{ steps.sim.outputs.udid }}" com.musictube.player
+          echo "App launched — waiting 10 s for startup to complete…"
+          sleep 10
+
+          # Check DiagnosticReports for any crash files created after launch
+          CRASHES=$(find ~/Library/Logs/DiagnosticReports -name "iosApp*" \
+            -newer /tmp/before_launch 2>/dev/null | wc -l | tr -d ' ')
+
+          if [ "$CRASHES" -gt 0 ]; then
+            echo "Crash report(s) found:"
+            find ~/Library/Logs/DiagnosticReports -name "iosApp*" \
+              -newer /tmp/before_launch -exec cat {} \;
+            exit 1
+          fi
+
+          echo "✓ App launched and ran for 10 s without crashing"
+
+      - name: Capture simulator screenshot
+        if: always()
+        run: |
+          xcrun simctl io "${{ steps.sim.outputs.udid }}" screenshot /tmp/simulator.png || true
+
+      - name: Upload screenshot
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-simulator-screenshot
+          path: /tmp/simulator.png
+          retention-days: 7
+
+      - name: Upload iOS Simulator app
+        uses: actions/upload-artifact@v4
+        with:
+          name: iosApp-debug-simulator
+          path: build/ios-derived/Build/Products/Debug-iphonesimulator/iosApp.app
+          retention-days: 7
+
+  # ── Release APK (on tags only) ───────────────────────────────────────────────
+  release:
+    name: Release APK
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [ android, ios ]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+
+      - name: Cache Gradle caches
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: gradle-${{ runner.os }}-${{ hashFiles('**/*.gradle.kts', 'gradle/wrapper/gradle-wrapper.properties') }}
+          restore-keys: gradle-${{ runner.os }}-
+
+      - name: Grant execute permission for gradlew
+        run: chmod +x gradlew
+
+      - name: Build release APK
+        run: ./gradlew :app:assembleRelease --stacktrace
+
+      - name: Upload release APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-release-unsigned
+          path: app/build/outputs/apk/release/app-release-unsigned.apk
+          retention-days: 30
