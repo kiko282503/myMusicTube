@@ -106,16 +106,14 @@ jobs:
           echo "Simulator UDID: $UDID"
           xcrun simctl list devices | grep "$UDID"
 
-      # Pre-build the KMP framework with the correct env vars that Xcode would
-      # normally pass to the "Build KMP Framework" script build phase.
-      - name: Build KMP framework for Simulator
-        env:
-          CONFIGURATION: Debug
-          SDK_NAME: iphonesimulator
-          ARCHS: arm64
-          EXPANDED_CODE_SIGN_IDENTITY: ""
-          EXPANDED_CODE_SIGN_IDENTITY_NAME: ""
-        run: ./gradlew :app:embedAndSignAppleFrameworkForXcode --stacktrace
+      # Pre-build the KMP framework binary for the simulator.
+      # We use linkDebugFrameworkIosSimulatorArm64 here (no Xcode env vars needed).
+      # When xcodebuild later runs the "Build KMP Framework" script phase, it calls
+      # embedAndSignAppleFrameworkForXcode with all Xcode env vars properly set,
+      # which finds the already-built binary from this step (Gradle incremental) and
+      # copies/embeds it into the app bundle.
+      - name: Pre-build KMP framework for Simulator
+        run: ./gradlew :app:linkDebugFrameworkIosSimulatorArm64 --stacktrace
 
       - name: Build iOS app (xcodebuild, no code signing)
         run: |
