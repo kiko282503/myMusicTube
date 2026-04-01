@@ -106,14 +106,26 @@ jobs:
           echo "Simulator UDID: $UDID"
           xcrun simctl list devices | grep "$UDID"
 
-      # Pre-build the KMP framework binary for the simulator.
-      # We use linkDebugFrameworkIosSimulatorArm64 here (no Xcode env vars needed).
-      # When xcodebuild later runs the "Build KMP Framework" script phase, it calls
-      # embedAndSignAppleFrameworkForXcode with all Xcode env vars properly set,
-      # which finds the already-built binary from this step (Gradle incremental) and
-      # copies/embeds it into the app bundle.
+      # Pre-build the KMP framework so it lands in the directory that
+      # FRAMEWORK_SEARCH_PATHS in project.pbxproj points to:
+      #   app/build/xcode-frameworks/Debug/iphonesimulator/ComposeApp.framework
+      #
+      # KEY: embedAndSignAppleFrameworkForXcode needs TARGET_BUILD_DIR +
+      # FRAMEWORKS_FOLDER_PATH to know the copy destination.  When called outside
+      # of Xcode (i.e. directly from the CI shell) those vars are not set, so we
+      # supply them manually.  Setting FRAMEWORKS_FOLDER_PATH to "" (empty) tells
+      # the task to copy ComposeApp.framework directly into TARGET_BUILD_DIR,
+      # which we point at the xcode-frameworks tree.
       - name: Pre-build KMP framework for Simulator
-        run: ./gradlew :app:linkDebugFrameworkIosSimulatorArm64 --stacktrace
+        env:
+          CONFIGURATION: Debug
+          SDK_NAME: iphonesimulator
+          ARCHS: arm64
+          EXPANDED_CODE_SIGN_IDENTITY: ""
+          EXPANDED_CODE_SIGN_IDENTITY_NAME: ""
+          TARGET_BUILD_DIR: ${{ github.workspace }}/app/build/xcode-frameworks/Debug/iphonesimulator
+          FRAMEWORKS_FOLDER_PATH: ""
+        run: ./gradlew :app:embedAndSignAppleFrameworkForXcode --stacktrace
 
       - name: Build iOS app (xcodebuild, no code signing)
         run: |
