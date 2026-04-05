@@ -66,6 +66,9 @@ class HomeViewModel(
         .map { songs -> songs.mapNotNull { if (it.id.startsWith("yt_")) it.id.removePrefix("yt_") else null }.toSet() }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptySet())
 
+    val downloadedSongsList: StateFlow<List<Song>> = musicRepository.getDownloadedSongs()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
     val playlists: StateFlow<List<Playlist>> = musicRepository.getAllPlaylists()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
@@ -92,6 +95,7 @@ class HomeViewModel(
     val previewVideoId  = playerController.currentVideoId
     val previewIsPlaying = playerController.isPlaying
     val previewIsLoading = playerController.isLoadingStream
+    val playbackError   = playerController.lastError
 
     val recentSongs: StateFlow<List<Song>> = songs
 
@@ -106,7 +110,19 @@ class HomeViewModel(
             }
         }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyMap())
 
-    init { loadTrendingSongs() }
+    init {
+        ensureOfflinePlaylist()
+        loadTrendingSongs()
+    }
+
+    private fun ensureOfflinePlaylist() {
+        viewModelScope.launch {
+            val exists = playlists.value.any { it.name == offlinePlaylistName }
+            if (!exists) {
+                musicRepository.createPlaylist(offlinePlaylistName, "Downloaded songs")
+            }
+        }
+    }
 
     fun loadTrendingSongs() {
         viewModelScope.launch {
@@ -167,6 +183,14 @@ class HomeViewModel(
             musicRepository.createPlaylist(offlinePlaylistName)
             downloadController.downloadSong(searchResult, offlinePlaylistName)
         }
+    }
+
+    fun reloadTrending() { loadTrendingSongs() }
+
+    fun playSearchResult(result: SearchResult) {
+        val song = Song(id = result.id, title = result.title,
+            artist = result.artist, thumbnailUrl = result.thumbnailUrl, isLocal = false)
+        playerController.playYouTubeAudioStream(result.id, song)
     }
 
     fun pause()    = playerController.pause()

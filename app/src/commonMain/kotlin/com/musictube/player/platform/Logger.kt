@@ -8,3 +8,6 @@ expect fun logError(tag: String, message: String, throwable: Throwable? = null)
 expect fun currentTimeMillis(): Long
 expect fun platformDeleteFile(path: String)
 expect fun platformUuid(): String
+
+/** Extracts a YouTube audio stream URL using native platform capabilities (NewPipe on Android, null on iOS). */
+expect suspend fun extractYouTubeAudioViaNewPipe(videoId: String): String?

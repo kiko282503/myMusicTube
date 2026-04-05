@@ -13,6 +13,7 @@ class IosAudioPlayer : AudioPlayerController {
     override val currentVideoId: StateFlow<String?> = MutableStateFlow(null)
     override val isPlaying: StateFlow<Boolean> = MutableStateFlow(false)
     override val isLoadingStream: StateFlow<Boolean> = MutableStateFlow(false)
+    override val lastError: StateFlow<String?> = MutableStateFlow(null)
     override val currentPosition: StateFlow<Long> = MutableStateFlow(0L)
     override val duration: StateFlow<Long> = MutableStateFlow(0L)
     override val volume: StateFlow<Float> = MutableStateFlow(1f)

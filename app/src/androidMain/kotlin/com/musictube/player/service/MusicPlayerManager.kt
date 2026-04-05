@@ -58,6 +58,9 @@ class MusicPlayerManager(
     private val _isLoadingStream = MutableStateFlow(false)
     override val isLoadingStream: StateFlow<Boolean> = _isLoadingStream.asStateFlow()
 
+    private val _lastError = MutableStateFlow<String?>(null)
+    override val lastError: StateFlow<String?> = _lastError.asStateFlow()
+
     private val _isShuffleOn = MutableStateFlow(false)
     override val isShuffleOn: StateFlow<Boolean> = _isShuffleOn.asStateFlow()
 
@@ -89,11 +92,16 @@ class MusicPlayerManager(
             addListener(object : Player.Listener {
                 override fun onIsPlayingChanged(isPlaying: Boolean) {
                     _isPlaying.value = isPlaying
-                    if (isPlaying) _isLoadingStream.value = false
+                    if (isPlaying) {
+                        _isLoadingStream.value = false
+                        _playbackTimeoutJob?.cancel()
+                        _playbackTimeoutJob = null
+                    }
                 }
                 override fun onPlaybackStateChanged(playbackState: Int) {
                     when (playbackState) {
                         Player.STATE_READY -> {
+                            _isLoadingStream.value = false
                             val dur = exoPlayer.duration
                             if (dur > 0) _duration.value = dur
                         }
@@ -103,8 +111,17 @@ class MusicPlayerManager(
                             if (_playQueue.value.isNotEmpty()) advanceQueue()
                             else { exoPlayer.seekTo(0); exoPlayer.pause() }
                         }
+                        Player.STATE_IDLE -> {
+                            _isLoadingStream.value = false
+                        }
                         else -> {}
                     }
+                }
+                override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
+                    _isLoadingStream.value = false
+                    _isPlaying.value = false
+                    _lastError.value = "Playback error: ${error.message ?: "unknown"}"
+                    android.util.Log.e("MusicPlayerManager", "ExoPlayer error: ${error.message}", error)
                 }
             })
         }
@@ -228,6 +245,7 @@ class MusicPlayerManager(
 
     // ── WebView (YouTube Music web fallback) ──────────────────────────────────
     private var _lastVideoId: String? = null
+    private var _playbackTimeoutJob: kotlinx.coroutines.Job? = null
     private var _lastTitle: String = ""
     private var _lastArtist: String = ""
     private var _lastThumb: String? = null
@@ -375,16 +393,41 @@ class MusicPlayerManager(
         _isPlaying.value = false; _currentPosition.value = 0L; _duration.value = 0L
         startNotificationService(title, artist, thumbnailUrl)
         _isLoadingStream.value = true
-        scope.launch {
-            val audioUrl = youTubeStreamService.extractAudioUrl(videoId)
-            if (audioUrl != null) {
-                val mediaItem = MediaItem.Builder().setUri(audioUrl).setMediaId("yt_$videoId").build()
-                exoPlayer.setMediaItem(mediaItem)
-                exoPlayer.prepare()
-                exoPlayer.play()
-            } else {
+        _lastError.value = null
+
+        // Safety timeout – reset spinner if playback hasn't started in 20 seconds
+        _playbackTimeoutJob?.cancel()
+        _playbackTimeoutJob = scope.launch {
+            delay(20_000)
+            if (_isLoadingStream.value) {
+                exoPlayer.stop()
                 _isLoadingStream.value = false
-                android.util.Log.e("MusicPlayerManager", "Failed to extract audio URL for $videoId")
+                _lastError.value = "Stream timed out – try again"
+                android.util.Log.w("MusicPlayerManager", "Playback start timeout for $videoId")
+            }
+        }
+
+        scope.launch {
+            try {
+                val audioUrl = youTubeStreamService.extractAudioUrl(videoId)
+                if (audioUrl != null) {
+                    val mediaItem = MediaItem.Builder().setUri(audioUrl).setMediaId("yt_$videoId").build()
+                    exoPlayer.setMediaItem(mediaItem)
+                    exoPlayer.prepare()
+                    exoPlayer.play()
+                } else {
+                    _playbackTimeoutJob?.cancel()
+                    _playbackTimeoutJob = null
+                    _isLoadingStream.value = false
+                    _lastError.value = "Could not find a stream for this song"
+                    android.util.Log.e("MusicPlayerManager", "Failed to extract audio URL for $videoId")
+                }
+            } catch (e: Exception) {
+                _playbackTimeoutJob?.cancel()
+                _playbackTimeoutJob = null
+                _isLoadingStream.value = false
+                _lastError.value = "Playback error: ${e.message ?: "unknown"}"
+                android.util.Log.e("MusicPlayerManager", "Exception in playYouTubeAudioStream", e)
             }
         }
     }

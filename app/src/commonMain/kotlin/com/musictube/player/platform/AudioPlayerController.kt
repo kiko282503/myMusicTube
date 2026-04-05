@@ -14,6 +14,7 @@ interface AudioPlayerController {
     val currentVideoId: StateFlow<String?>
     val isPlaying: StateFlow<Boolean>
     val isLoadingStream: StateFlow<Boolean>
+    val lastError: StateFlow<String?>
     val currentPosition: StateFlow<Long>
     val duration: StateFlow<Long>
     val volume: StateFlow<Float>

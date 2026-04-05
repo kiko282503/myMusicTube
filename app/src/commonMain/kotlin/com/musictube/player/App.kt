@@ -119,8 +119,10 @@ fun MusicTubeApp(
 
             composable("home") {
                 HomeScreen(
-                    onNavigateToPlayer = onNavigateToPlayer,
-                    onNavigateToSearch = { navController.navigate("search") { launchSingleTop = true } }
+                    onNavigateToPlayer    = onNavigateToPlayer,
+                    onNavigateToSearch    = { navController.navigate("search") { launchSingleTop = true } },
+                    onNavigateToQuickPicks = { navController.navigate("quick_picks") { launchSingleTop = true } },
+                    onNavigateToPlaylist  = { id -> navController.navigate("playlist/$id") { launchSingleTop = true } }
                 )
             }
 

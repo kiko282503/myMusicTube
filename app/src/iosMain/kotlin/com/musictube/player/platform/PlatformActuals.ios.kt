@@ -30,3 +30,5 @@ actual fun platformDeleteFile(path: String) {
 }
 
 actual fun platformUuid(): String = NSUUID().description ?: ""
+
+actual suspend fun extractYouTubeAudioViaNewPipe(videoId: String): String? = null
