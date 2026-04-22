@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Fully transparent icon used as windowSplashScreenAnimatedIcon so the
+     OS system splash shows only the plain lavender background — no icon.
+     The Compose splash screen renders the actual icon with a spinner. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M0,0 H24 V24 H0 Z" />
+</vector>

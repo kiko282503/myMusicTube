@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Splash screen icon — 240×240dp canvas.
+  Static layers: purple circle + white music note (app icon).
+  Animated layer: "spinner" group — a 300° arc that rotates via AnimatedVectorDrawable.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="240dp"
+    android:height="240dp"
+    android:viewportWidth="240"
+    android:viewportHeight="240">
+
+    <!-- Spinning progress ring — 300° arc, pivot at canvas centre (120,120) -->
+    <!-- Animated by ic_splash_animated.xml / splash_spinner_rotate.xml       -->
+    <group
+        android:name="spinner"
+        android:pivotX="120"
+        android:pivotY="120"
+        android:rotation="0">
+        <!-- 300° clockwise arc: start top (120,20) → end upper-left (33,70)  -->
+        <!-- A 100,100 0 large-arc=1 sweep-clockwise=1 33,70                   -->
+        <path
+            android:fillColor="#00000000"
+            android:strokeColor="#FF7C3AED"
+            android:strokeWidth="9"
+            android:strokeLineCap="round"
+            android:pathData="M120,20 A100,100 0 1 1 33,70" />
+    </group>
+
+    <!-- Purple circle background for the app icon -->
+    <!-- Two semicircles to avoid degenerate single-point arc -->
+    <path
+        android:fillColor="#FF7C3AED"
+        android:pathData="M50,120 A70,70 0 0,1 190,120 A70,70 0 0,1 50,120 Z" />
+
+    <!-- White music note — original 24×24 path scaled ×3.333 + offset (80,80) -->
+    <!-- Result: 80×80 note centred at (120,120) inside the purple circle       -->
+    <group
+        android:scaleX="3.333"
+        android:scaleY="3.333"
+        android:translateX="80"
+        android:translateY="80">
+        <path
+            android:fillColor="#FFFFFFFF"
+            android:pathData="M12,3v10.55c-0.59,-0.34 -1.27,-0.55 -2,-0.55c-2.21,0 -4,1.79 -4,4s1.79,4 4,4s4,-1.79 4,-4V7h4V3h-6z" />
+    </group>
+
+</vector>

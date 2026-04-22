@@ -7,19 +7,27 @@ import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CloudDownload
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.res.painterResource
+import kotlinx.coroutines.delay
 import androidx.compose.material3.*
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
+ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.tooling.preview.Preview
@@ -58,20 +66,29 @@ class MainActivity : ComponentActivity() {
     // Drives navigation requests from notification intents into the Compose NavHost.
     private var pendingDestination by mutableStateOf<String?>(null)
     private var pendingSharedPlaylist by mutableStateOf<SharedPlaylistData?>(null)
+
+    private var showSplash by mutableStateOf(true)
     
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        enableEdgeToEdge()
+        // Don't re-show the Compose splash on rotation / re-creation
+        if (savedInstanceState != null) showSplash = false
         pendingDestination = intent?.getStringExtra("navigate_to")
         pendingSharedPlaylist = intent?.let { resolveSharedPlaylist(it) }
         
         setContent {
             MusicTubeTheme {
-                MusicTubeApp(
-                    pendingDestination = pendingDestination,
-                    onPendingConsumed = { pendingDestination = null },
-                    pendingSharedPlaylist = pendingSharedPlaylist,
-                    onSharedPlaylistConsumed = { pendingSharedPlaylist = null }
-                )
+                if (showSplash) {
+                    MusicTubeSplashScreen(onSplashComplete = { showSplash = false })
+                } else {
+                    MusicTubeApp(
+                        pendingDestination = pendingDestination,
+                        onPendingConsumed = { pendingDestination = null },
+                        pendingSharedPlaylist = pendingSharedPlaylist,
+                        onSharedPlaylistConsumed = { pendingSharedPlaylist = null }
+                    )
+                }
             }
         }
     }
@@ -176,6 +193,48 @@ class MainActivity : ComponentActivity() {
         super.onStop()
         // Even when stopped, try to keep WebView active
         playerManager.parkWebView(this)
+    }
+}
+
+/**
+ * Full-screen splash shown while the app is initialising.
+ * The windowBackground is the same lavender colour, so this composable
+ * appears instantly with no visible transition.
+ */
+@Composable
+fun MusicTubeSplashScreen(onSplashComplete: () -> Unit) {
+    LaunchedEffect(Unit) {
+        delay(1_800L)
+        onSplashComplete()
+    }
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color(0xFFF0E8FF)),
+        contentAlignment = Alignment.Center
+    ) {
+        // Faint track ring
+        CircularProgressIndicator(
+            progress = { 1f },
+            modifier = Modifier.size(300.dp),
+            color = Color(0xFF7C3AED).copy(alpha = 0.18f),
+            strokeWidth = 10.dp,
+        )
+        // Spinning indeterminate ring
+        CircularProgressIndicator(
+            modifier = Modifier.size(300.dp),
+            color = Color(0xFF7C3AED),
+            strokeWidth = 10.dp,
+            trackColor = Color.Transparent
+        )
+        // App icon — circle-clipped
+        Image(
+            painter = painterResource(id = R.drawable.ic_launcher_circle),
+            contentDescription = "MusicTube",
+            modifier = Modifier
+                .size(250.dp)
+                .clip(CircleShape)
+        )
     }
 }
 

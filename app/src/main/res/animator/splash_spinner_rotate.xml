@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Continuously rotates the "spinner" group in ic_splash_icon.xml
+  one full revolution per 900 ms using a linear (constant-speed) interpolator.
+-->
+<objectAnimator xmlns:android="http://schemas.android.com/apk/res/android"
+    android:propertyName="rotation"
+    android:valueFrom="0"
+    android:valueTo="360"
+    android:duration="900"
+    android:repeatCount="infinite"
+    android:repeatMode="restart"
+    android:interpolator="@android:anim/linear_interpolator" />

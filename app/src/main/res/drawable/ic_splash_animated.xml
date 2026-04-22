@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  AnimatedVectorDrawable for the splash screen.
+  Uses ic_splash_icon as the base vector and applies the rotation animator
+  to the "spinner" group (the 300° progress arc).
+-->
+<animated-vector
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    android:drawable="@drawable/ic_splash_icon">
+
+    <target
+        android:name="spinner"
+        android:animation="@animator/splash_spinner_rotate" />
+
+</animated-vector>
